@@ -1,0 +1,4 @@
+node_modules/
+.env
+dados-locais/
+arquivos-locais/
