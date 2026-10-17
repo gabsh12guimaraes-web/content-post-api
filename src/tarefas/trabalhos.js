@@ -7,7 +7,9 @@ import { SISTEMA_IDEIAS, SISTEMA_POST, SISTEMA_AJUSTE, idiomaDe, briefingTexto }
 import { devolver } from "../planos.js";
 import { lerArquivo } from "../arquivos.js";
 
-const ehVideo = formato => ["Reels", "Stories"].includes(formato);
+// Story em imagem estática segue o caminho das fotos (1 imagem vertical); os outros stories e os Reels são vídeo.
+const ehStoryImagem = post => post.formato === "Stories" && post.briefing && post.briefing.story === "imagem";
+const ehVideo = (formato, post) => ["Reels", "Stories"].includes(formato) && !(post && ehStoryImagem(post));
 const marcaDe = async org => (await db().query("select * from marcas where org_id = $1", [org])).rows[0] || { org_id: org, pilares: [], redes: [], mood_board: [] };
 const postDe = async (org, id) => (await db().query("select * from posts where id = $1 and org_id = $2", [id, org])).rows[0];
 const lst = v => (Array.isArray(v) ? v.join(", ") : v || "");
@@ -97,7 +99,7 @@ registrar("ideias", async (org, pedido = {}) => {
 
 /* ================= 2. Mídias do post: fotos (Mystic) e clipes (Kling 3) ================= */
 async function gerarMidias(org, post, c, regerar) {
-  const video = ehVideo(post.formato);
+  const video = ehVideo(post.formato, post);
   const fotos = { ...(post.fotos || {}) }, clipes = { ...(post.clipes || {}) };
   const velhos = [];
   const precisa = (mapa, n) => (regerar ? regerar.includes(n) : !mapa[n]);
@@ -155,7 +157,7 @@ registrar("criar", Object.assign(async (org, { post: id }) => {
   const mood = await moodBoard(org, m);
   const content = mood.length ? [{ type: "text", text: "Mood board da marca (referência de estilo):" }, ...mood, { type: "text", text: user }] : user;
   const c = await claude(org, { system: SISTEMA_POST, content, effort: "high" });
-  const video = ehVideo(post.formato);
+  const video = ehVideo(post.formato, post);
   await db().query("update posts set legenda = $2, hashtags = $3, slides = $4, conteudo = $5, atualizado_em = now() where id = $1",
     [post.id, c.legenda || "", (c.hashtags || []).join(" "), JSON.stringify(video ? c.cenas || [] : c.slides || []), JSON.stringify(c)]);
   // Começa do zero: apaga mídias de uma criação anterior.
@@ -182,7 +184,7 @@ registrar("ajustar", Object.assign(async (org, { post: id, comentario, slide = 0
   const user = [blocoMarca(m), "", `<versao_atual numero="${post.versao}">`, JSON.stringify(atual, null, 1), "</versao_atual>", "",
     "<historico>", post.historico_ajustes || "", "</historico>", "", "<comentario>", comentario, "</comentario>"].join("\n");
   const c = await claude(org, { system: SISTEMA_AJUSTE, content: user, effort: "medium" });
-  const video = ehVideo(post.formato);
+  const video = ehVideo(post.formato, post);
   let regerar = (video && !(c.alterou_imagens || []).length ? c.alterou_slides : c.alterou_imagens || []).map(Number).filter(Boolean);
   if (novaImagem && !slide) regerar = [...new Set(regerar.concat((c.slides || c.cenas || []).filter(s => s.usa_imagem || s.usa_video || video).map((s, i) => Number(s.n) || i + 1)))];
   if (slide) {

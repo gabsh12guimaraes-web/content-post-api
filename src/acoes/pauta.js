@@ -289,6 +289,7 @@ export const acoesPauta = {
       duracao: [15, 30, 45].includes(Number(r.duracao)) ? Number(r.duracao) : undefined,
       cenas: r.cenas === "auto" ? "auto" : (Number(r.cenas) >= 2 && Number(r.cenas) <= 8 ? Number(r.cenas) : undefined),
       textoNaTela: um(r.textoNaTela, ["sim", "nao"]), observacoes: texto(r.observacoes, 1000) || undefined,
+      story: um(r.story, ["imagem", "continuo", "varios"]),
     };
     Object.keys(br).forEach(k => br[k] === undefined && delete br[k]);
     await usar(ctx.org, "post");

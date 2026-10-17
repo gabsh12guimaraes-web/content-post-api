@@ -334,3 +334,41 @@ test("editar textos depois de pronto e ajustar um slide só", async () => {
   assert.equal(p.Legenda, "Legenda nova", "legenda não muda");
   assert.ok(!pedidos.some(u => u.includes("/v1/ai/mystic")), "não gera imagem de outro slide");
 });
+
+test("story em imagem estática gera 1 foto vertical e nenhum clipe", async () => {
+  const i = (await db().query("insert into ideias (org_id, titulo, formato, rede, score) values ($1, 'Story de teste', 'Stories', 'Instagram', 7) returning id", [anaOrg])).rows[0].id;
+  const { id } = await chamar({ acao: "agendarIdeia", id: i, data: new Date(Date.now() + 3 * 86400000).toISOString() }, ana);
+  const original = globalThis.fetch, pedidos = [];
+  let corpoClaude = null, corpoMystic = null;
+  globalThis.fetch = async (url, op = {}) => {
+    pedidos.push(String(url));
+    const json = o => new Response(JSON.stringify(o), { headers: { "content-type": "application/json" } });
+    if (String(url).includes("anthropic.com")) {
+      corpoClaude = JSON.parse(op.body);
+      return json({ content: [{ type: "text", text: JSON.stringify({ legenda: "", hashtags: [], cenas: [], slides: [{ n: 1, titulo: "Vem aí", texto: "", usa_imagem: true }], prompts_imagem: [{ slide: 1, prompt: "a phone", proporcao: "9:16" }] }) }], stop_reason: "end_turn" });
+    }
+    if (String(url).endsWith("/v1/ai/mystic") && op.method === "POST") { corpoMystic = JSON.parse(op.body); return json({ data: { task_id: "t9", status: "CREATED" } }); }
+    if (String(url).includes("/v1/ai/mystic/t9")) return json({ data: { status: "COMPLETED", generated: ["https://cdn.exemplo/story.jpg"] } });
+    if (String(url) === "https://cdn.exemplo/story.jpg") return new Response(Buffer.from(JPG, "base64"), { headers: { "content-type": "image/jpeg" } });
+    return original(url, op);
+  };
+  try {
+    assert.equal((await chamar({ acao: "criarPost", id, briefing: { story: "imagem", fundo: "fotos", cenas: "5" } }, ana)).status, 200);
+    await puxar();
+    for (let k = 0; k < 100; k++) {
+      const st = (await db().query("select status from tarefas where tipo = 'criar' order by criado_em desc limit 1")).rows[0].status;
+      if (st === "feito" || st === "erro") break;
+      await new Promise(r => setTimeout(r, 50));
+    }
+  } finally { globalThis.fetch = original; }
+  const t = (await db().query("select status, erro from tarefas where tipo = 'criar' order by criado_em desc limit 1")).rows[0];
+  assert.equal(t.status, "feito", t.erro || "");
+  const textoFinal = corpoClaude.messages[0].content;
+  assert.ok(String(typeof textoFinal === "string" ? textoFinal : JSON.stringify(textoFinal)).includes("IMAGEM ESTÁTICA"));
+  assert.equal(corpoMystic.aspect_ratio, "social_story_9_16");
+  assert.ok(!pedidos.some(u => u.includes("/v1/ai/video/")), "não gera clipe");
+  const p = (await chamar({ acao: "pauta" }, ana)).posts.find(x => x.id === id);
+  assert.equal(JSON.parse(p.Slides).length, 1);
+  assert.equal(p.Fotos.length, 1);
+  assert.equal(JSON.parse(p.Briefing).story, "imagem");
+});

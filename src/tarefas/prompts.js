@@ -69,8 +69,14 @@ export const idiomaDe = m => (m && m.idioma) || "Português (Brasil)";
 export function briefingTexto(b, formato) {
   if (!b || typeof b !== 'object') return '';
   const L = [];
-  const video = ['Reels', 'Stories'].includes(formato);
-  if (!video) {
+  const storyImagem = formato === 'Stories' && b.story === 'imagem';
+  const video = ['Reels', 'Stories'].includes(formato) && !storyImagem;
+  if (storyImagem) {
+    L.push('- story em IMAGEM ESTÁTICA (não é vídeo): use "slides" com exatamente 1 slide e deixe "cenas" vazia');
+    L.push('- o slide tem "titulo" curto (até 8 palavras) e "texto" opcional (até 15 palavras)');
+    if (b.fundo === 'texto') L.push('- sem imagem: "usa_imagem" false e "prompts_imagem" vazio');
+    else L.push('- "usa_imagem" true e 1 prompt de imagem com "proporcao": "9:16" (vertical)');
+  } else if (!video) {
     const capa = { foto: 'capa (slide 1) com foto de fundo', video: 'capa (slide 1) em vídeo: usa_video true e usa_imagem true', texto: 'capa (slide 1) só com texto, sem imagem' }[b.capa];
     if (capa && formato !== 'Estatico') L.push('- ' + capa);
     const fundo = {
@@ -82,8 +88,12 @@ export function briefingTexto(b, formato) {
     if (fundo) L.push('- ' + (formato === 'Estatico' ? fundo.replace('demais slides', 'o post') : fundo));
     if (b.slides && b.slides !== 'auto' && formato !== 'Estatico') L.push('- exatamente ' + Number(b.slides) + ' slides');
   } else {
-    if (b.duracao) L.push('- duração total de até ' + Number(b.duracao) + ' segundos');
-    if (b.cenas && b.cenas !== 'auto') L.push('- exatamente ' + Number(b.cenas) + ' cenas');
+    if (b.story === 'continuo') L.push('- story em VÍDEO CONTÍNUO: exatamente 1 cena, sem cortes, com "duracao_s" entre 8 e 10');
+    else {
+      if (b.story === 'varios') L.push('- story com vários vídeos curtos em sequência');
+      if (b.duracao) L.push('- duração total de até ' + Number(b.duracao) + ' segundos');
+      if (b.cenas && b.cenas !== 'auto') L.push('- exatamente ' + Number(b.cenas) + ' cenas');
+    }
     if (b.textoNaTela === 'nao') L.push('- sem texto na tela: deixe "fala_ou_texto" vazio em todas as cenas');
   }
   const obj = { engajar: 'engajar (comentários, salvamentos, compartilhamentos)', educar: 'educar e tirar dúvidas', vender: 'converter: levar para compra ou cadastro', institucional: 'fortalecer a marca' }[b.objetivo];
