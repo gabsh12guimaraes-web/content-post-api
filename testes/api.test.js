@@ -397,3 +397,13 @@ test("cada rede recebe o texto e as mídias que aceita; escolher redes do post",
   assert.deepEqual((await chamar({ acao: "pauta" }, ana)).posts.find(x => x.id === p.id).Redes, ["Instagram", "X"]);
   assert.equal((await chamar({ acao: "salvarRedes", id: p.id, redes: [] }, bob)).status, 400);
 });
+
+test("a chave de publicação da plataforma nunca é usada por clientes", async () => {
+  process.env.COBRANCA = "sim"; process.env.PLATAFORMA_ZERNIO = "sk_zernio_da_plataforma"; process.env.PLATAFORMA_ANTHROPIC = "sk-ant-da-plataforma";
+  try {
+    const r = await chamar({ acao: "cadastrar", nome: "Eva", email: "eva@exemplo.com", senha: "segredo123", organizacao: "Loja da Eva" });
+    const { chaveDe } = await import("../src/provedores/index.js");
+    assert.equal(await chaveDe(r.organizacao.id, "anthropic"), "sk-ant-da-plataforma");
+    await assert.rejects(() => chaveDe(r.organizacao.id, "zernio"), /não está cadastrada/);
+  } finally { delete process.env.COBRANCA; delete process.env.PLATAFORMA_ZERNIO; delete process.env.PLATAFORMA_ANTHROPIC; }
+});

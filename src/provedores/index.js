@@ -10,8 +10,9 @@ const NOMES = { anthropic: "Claude", magnific: "Magnific", apify: "Apify", zerni
 export async function chaveDe(org, provedor) {
   const r = (await db().query("select valor_cifrado from integracoes where org_id = $1 and provedor = $2", [org, provedor])).rows[0];
   if (!r) {
-    // Planos pagos incluem a IA: sem chave própria, usa a da plataforma (PLATAFORMA_ANTHROPIC, _MAGNIFIC, _APIFY, _ZERNIO).
-    const daPlataforma = process.env["PLATAFORMA_" + provedor.toUpperCase()];
+    // Planos pagos incluem a IA: sem chave própria, usa a da plataforma (PLATAFORMA_ANTHROPIC, _MAGNIFIC, _APIFY).
+    // O Zernio nunca: a chave da plataforma publicaria nas redes conectadas na conta da plataforma, não nas do cliente.
+    const daPlataforma = provedor === "zernio" ? null : process.env["PLATAFORMA_" + provedor.toUpperCase()];
     if (daPlataforma && cobrancaLigada()) { const s = await situacao(org); if (s.ativo) return daPlataforma; }
   }
   if (!r) throw new ErroIntegracao(`A chave do ${NOMES[provedor]} não está cadastrada. Cadastre em Integrações.`);
