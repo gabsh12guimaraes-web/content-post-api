@@ -9,10 +9,21 @@ import { lerArquivo } from "./arquivos.js";
 import { acoesConta, acoesOrg } from "./acoes/conta.js";
 import { acoesPauta } from "./acoes/pauta.js";
 import { ErroIntegracao } from "./provedores/index.js";
+import { catalogo, situacao, assinaturaKiwifyOk, avisoKiwify } from "./planos.js";
 
-const PUBLICAS = new Set(["cadastrar", "entrar", "verConvite"]);
+const PUBLICAS = new Set(["cadastrar", "entrar", "verConvite", "planos"]);
 const SEM_ORG = new Set(["eu", "sair", "trocarSenha", "aceitarConvite", "criarOrganizacao", "trocarOrganizacao"]);
-const TODAS = { ...acoesConta, ...acoesOrg, ...acoesPauta };
+const acoesPlano = {
+  async planos() { return catalogo(); },
+  // Plano da organização, uso do mês e links de checkout já com a organização (sck) e o e-mail preenchidos.
+  async plano(ctx) {
+    const c = catalogo(), s = await situacao(ctx.org);
+    const link = u => { if (!u) return null; const x = new URL(u); x.searchParams.set("sck", ctx.org); x.searchParams.set("email", ctx.usuario.email); return x.toString(); };
+    c.planos.forEach(p => p.ciclos.forEach(k => { k.checkout = link(k.checkout); }));
+    return { situacao: s, ...c };
+  },
+};
+const TODAS = { ...acoesConta, ...acoesOrg, ...acoesPauta, ...acoesPlano };
 
 // Limite simples por IP para login e cadastro (evita tentativa de senha em massa).
 const tentativas = new Map();
@@ -40,7 +51,21 @@ export async function criarApp() {
   const app = Fastify({ logger: false, bodyLimit: 90 * 1024 * 1024, trustProxy: true });
   await app.register(cors, { origin: config.origens, methods: ["GET", "POST", "OPTIONS"], allowedHeaders: ["content-type", "x-pauta-token", "authorization"], maxAge: 600 });
 
+  // Guarda o corpo bruto para conferir a assinatura da Kiwify.
+  app.addContentTypeParser("application/json", { parseAs: "string" }, (req, corpo, pronto) => {
+    req.corpoBruto = corpo;
+    if (!corpo) return pronto(null, {});
+    try { pronto(null, JSON.parse(corpo)); } catch (e) { e.statusCode = 400; pronto(e); }
+  });
+
   app.get("/saude", async () => ({ ok: true }));
+
+  // Avisos da Kiwify (compra aprovada, renovação, cancelamento, estorno).
+  app.post("/kiwify", async (req, rep) => {
+    if (!assinaturaKiwifyOk(req.corpoBruto, req.query.signature)) return rep.code(401).send({ ok: false });
+    try { return { ok: true, ...(await avisoKiwify(req.body || {})) }; }
+    catch (e) { console.error("[kiwify]", e); return rep.code(500).send({ ok: false }); }
+  });
 
   app.get("/f/:id/:chave", async (req, rep) => {
     const { id, chave } = req.params;

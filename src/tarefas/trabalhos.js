@@ -4,6 +4,7 @@ import { claude, gerarFoto, gerarClipe, coletarApify, publicarZernio, chaveDe, E
 import { guardarDeUrl, apagarArquivos, anexos } from "../arquivos.js";
 import { registrar } from "./fila.js";
 import { SISTEMA_IDEIAS, SISTEMA_POST, SISTEMA_AJUSTE, idiomaDe, briefingTexto } from "./prompts.js";
+import { devolver } from "../planos.js";
 import { lerArquivo } from "../arquivos.js";
 
 const ehVideo = formato => ["Reels", "Stories"].includes(formato);
@@ -164,7 +165,11 @@ registrar("criar", Object.assign(async (org, { post: id }) => {
     [post.id, JSON.stringify(r.fotos), JSON.stringify(r.clipes), avisoFalhas(r.falhas)]);
   return { fotos: Object.keys(r.fotos).length, clipes: Object.keys(r.clipes).length, falhas: r.falhas };
 }, {
-  aoFalhar: async (org, { post }, e) => db().query("update posts set status = 'Erro', erro = $3 where id = $1 and org_id = $2", [post, org, "Não consegui criar: " + String(e.message).slice(0, 400)]),
+  aoFalhar: async (org, { post }, e) => {
+    await db().query("update posts set status = 'Erro', erro = $3 where id = $1 and org_id = $2", [post, org, "Não consegui criar: " + String(e.message).slice(0, 400)]);
+    // Post que não saiu não conta no limite do plano.
+    await devolver(org, "post");
+  },
 }));
 
 /* ================= 3. Ajuste pedido na revisão ================= */

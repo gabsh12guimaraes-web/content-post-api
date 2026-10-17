@@ -7,6 +7,7 @@ import { enfileirar } from "../tarefas/fila.js";
 import { cifrar } from "../cripto.js";
 import { podeGerir } from "./conta.js";
 import { publicarJa } from "../tarefas/trabalhos.js";
+import { usar } from "../planos.js";
 
 const LOGOS = ["Logo", "LogoDark", "SimboloLight", "SimboloDark"];
 const STATUS_IDEIA = ["Sugerida", "Aprovada", "Descartada", "Guardada"];
@@ -228,6 +229,7 @@ export const acoesPauta = {
       quantidade: Math.max(1, Math.min(20, parseInt(b.quantidade, 10) || 10)),
       formatos: (Array.isArray(b.formatos) ? b.formatos : []).filter(f => FORMATOS.includes(f)),
     };
+    await usar(ctx.org, "ideias");
     await enfileirar(ctx.org, "ideias", pedido, ctx.usuario.id);
     return {};
   },
@@ -267,6 +269,7 @@ export const acoesPauta = {
       textoNaTela: um(r.textoNaTela, ["sim", "nao"]), observacoes: texto(r.observacoes, 1000) || undefined,
     };
     Object.keys(br).forEach(k => br[k] === undefined && delete br[k]);
+    await usar(ctx.org, "post");
     await db().query("update posts set status = 'EmCriacao', erro = null, briefing = $2, atualizado_em = now() where id = $1", [p.id, Object.keys(br).length ? JSON.stringify(br) : null]);
     await enfileirar(ctx.org, "criar", { post: p.id }, ctx.usuario.id);
     return {};

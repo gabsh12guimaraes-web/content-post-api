@@ -253,3 +253,43 @@ test("buscar ideias guarda o pedido; mudar data e publicar agora", async () => {
   assert.equal(corpoZernio.publishNow, true);
   assert.deepEqual(corpoZernio.mediaItems.map(m => m.type), ["image"]);
 });
+
+test("planos: limite do teste, aviso da Kiwify ativa o plano e assinatura falsa é recusada", async () => {
+  const r = await chamar({ acao: "cadastrar", nome: "Duda", email: "duda@exemplo.com", senha: "segredo123", organizacao: "Loja da Duda" });
+  const duda = r.token, org = r.organizacao.id;
+  const cat = await chamar({ acao: "planos" });
+  assert.equal(cat.planos.length, 3);
+  assert.equal(cat.planos.find(p => p.id === "profissional").ciclos.find(c => c.ciclo === "anual").total, 729 * 12);
+
+  process.env.COBRANCA = "sim";
+  try {
+    for (let k = 0; k < 2; k++) {
+      assert.equal((await chamar({ acao: "buscarIdeias" }, duda)).status, 200, "busca " + k);
+      await db().query("update tarefas set status = 'feito' where org_id = $1", [org]);
+    }
+    const bloqueio = await chamar({ acao: "buscarIdeias" }, duda);
+    assert.equal(bloqueio.status, 402);
+    assert.equal(bloqueio.plano, true);
+
+    // Assinatura errada: nada muda.
+    process.env.KIWIFY_TOKEN = "tok-teste";
+    const corpo = JSON.stringify({ order_id: "ped-1", webhook_event_type: "order_approved", order_status: "paid",
+      Product: { product_id: "p1", product_name: "Content Post Profissional Anual" }, Customer: { email: "outra@pessoa.com" },
+      TrackingParameters: { sck: org }, Subscription: { id: "sub-1", plan: { name: "Anual", frequency: "yearly" } } });
+    const ruim = await app.inject({ method: "POST", url: "/kiwify?signature=abc", payload: corpo, headers: { "content-type": "application/json" } });
+    assert.equal(ruim.statusCode, 401);
+    const sig = crypto.createHmac("sha1", "tok-teste").update(corpo).digest("hex");
+    const bom = await app.inject({ method: "POST", url: "/kiwify?signature=" + sig, payload: corpo, headers: { "content-type": "application/json" } });
+    assert.equal(bom.statusCode, 200);
+    assert.match(bom.json().resultado, /ativado profissional:anual/);
+    const de_novo = await app.inject({ method: "POST", url: "/kiwify?signature=" + sig, payload: corpo, headers: { "content-type": "application/json" } });
+    assert.equal(de_novo.json().repetido, true);
+
+    const p = await chamar({ acao: "plano" }, duda);
+    assert.equal(p.situacao.plano, "profissional");
+    assert.equal(p.situacao.ativo, true);
+    assert.equal(p.situacao.ideias.usadas, 2, "no plano pago contam as buscas do mês");
+    assert.equal(p.situacao.ideias.limite, 20);
+    assert.match(p.planos[0].ciclos[0].checkout || "sem-link", /sem-link|sck=/);
+  } finally { delete process.env.COBRANCA; delete process.env.KIWIFY_TOKEN; }
+});

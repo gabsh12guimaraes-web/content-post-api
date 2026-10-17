@@ -2,12 +2,18 @@
 import { db } from "../db.js";
 import { decifrar } from "../cripto.js";
 import { config } from "../config.js";
+import { situacao, cobrancaLigada } from "../planos.js";
 
 export class ErroIntegracao extends Error {}
 const NOMES = { anthropic: "Claude", magnific: "Magnific", apify: "Apify", zernio: "Zernio" };
 
 export async function chaveDe(org, provedor) {
   const r = (await db().query("select valor_cifrado from integracoes where org_id = $1 and provedor = $2", [org, provedor])).rows[0];
+  if (!r) {
+    // Planos pagos incluem a IA: sem chave própria, usa a da plataforma (PLATAFORMA_ANTHROPIC, _MAGNIFIC, _APIFY, _ZERNIO).
+    const daPlataforma = process.env["PLATAFORMA_" + provedor.toUpperCase()];
+    if (daPlataforma && cobrancaLigada()) { const s = await situacao(org); if (s.ativo) return daPlataforma; }
+  }
   if (!r) throw new ErroIntegracao(`A chave do ${NOMES[provedor]} não está cadastrada. Cadastre em Integrações.`);
   return decifrar(r.valor_cifrado);
 }
