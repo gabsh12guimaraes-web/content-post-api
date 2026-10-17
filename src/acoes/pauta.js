@@ -6,6 +6,7 @@ import { marcaParaPainel, fonteParaPainel, ideiaParaPainel, postsParaPainel } fr
 import { enfileirar } from "../tarefas/fila.js";
 import { cifrar } from "../cripto.js";
 import { podeGerir } from "./conta.js";
+import { publicarJa } from "../tarefas/trabalhos.js";
 
 const LOGOS = ["Logo", "LogoDark", "SimboloLight", "SimboloDark"];
 const STATUS_IDEIA = ["Sugerida", "Aprovada", "Descartada", "Guardada"];
@@ -210,10 +211,25 @@ export const acoesPauta = {
     return {};
   },
 
-  async buscarIdeias(ctx) {
+  async buscarIdeias(ctx, b) {
     const rodando = await db().query("select 1 from tarefas where org_id = $1 and tipo = 'ideias' and status in ('pendente', 'rodando')", [ctx.org]);
     if (rodando.rows.length) falha("Já estou buscando ideias para esta organização. Aguarde terminar.");
-    await enfileirar(ctx.org, "ideias", {}, ctx.usuario.id);
+    // Pedido opcional do painel: tema, quantas ideias e quais formatos.
+    const FORMATOS = ["Reels", "Carrossel", "Estatico", "Stories"];
+    const pedido = {
+      tema: texto(b.tema, 300),
+      quantidade: Math.max(1, Math.min(20, parseInt(b.quantidade, 10) || 10)),
+      formatos: (Array.isArray(b.formatos) ? b.formatos : []).filter(f => FORMATOS.includes(f)),
+    };
+    await enfileirar(ctx.org, "ideias", pedido, ctx.usuario.id);
+    return {};
+  },
+
+  async publicarAgora(ctx, b) {
+    const p = await postDaOrg(ctx.org, b.id);
+    if (p.status !== "Agendado") falha("Só posts agendados podem ser publicados agora.");
+    if (!p.artes_prontas) falha("Gere as artes finais antes de publicar.");
+    if (!(await publicarJa(ctx.org, p.id))) falha("Este post já está sendo publicado.");
     return {};
   },
 

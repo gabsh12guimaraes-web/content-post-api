@@ -56,7 +56,11 @@ async function coletar(org, fontes) {
   return { refs, aviso: "" };
 }
 
-registrar("ideias", async (org) => {
+registrar("ideias", async (org, pedido = {}) => {
+  const FORMATOS = ["Reels", "Carrossel", "Estatico", "Stories"];
+  const quantidade = Math.max(1, Math.min(20, Number(pedido.quantidade) || 10));
+  const formatos = (Array.isArray(pedido.formatos) ? pedido.formatos : []).filter(f => FORMATOS.includes(f));
+  const tema = String(pedido.tema || "").trim().slice(0, 300);
   const m = await marcaDe(org);
   const fontes = (await db().query("select * from fontes where org_id = $1 and ativa", [org])).rows;
   const { refs, aviso } = await coletar(org, fontes);
@@ -64,12 +68,13 @@ registrar("ideias", async (org) => {
   const refMap = {};
   const lista = top.map((r, i) => { const ref = "c" + (i + 1); refMap[ref] = r.id; return { ref, fonte: r.fonte, peso_fonte: r.peso, rede: r.rede, formato: r.formato, texto: r.texto, engajamento_relativo: r.eng }; });
   const interesses = fontes.filter(f => !["Perfil", "Hashtag"].includes(f.tipo)).map(f => f.nome);
-  if (!lista.length && !interesses.length) throw new Error("Nenhuma fonte ativa para buscar ideias. Cadastre perfis, hashtags ou temas em Marca e fontes.");
+  if (!lista.length && !interesses.length && !tema) throw new Error("Nenhuma fonte ativa para buscar ideias. Cadastre perfis, hashtags ou temas em Marca e fontes, ou informe um tema.");
   const recentes = (await db().query("select titulo, status, motivo_descarte from ideias where org_id = $1 and criada_em > now() - interval '90 days'", [org])).rows;
-  const user = [blocoMarca(m), "", "<interesses>" + interesses.join(", ") + "</interesses>", "", "<referencias>", JSON.stringify(lista, null, 1), "</referencias>", "",
+  const user = [blocoMarca(m), "", "<interesses>" + interesses.join(", ") + "</interesses>", tema ? "\n<tema_pedido>" + tema + "</tema_pedido>" : "", "", "<referencias>", JSON.stringify(lista, null, 1), "</referencias>", "",
     "<ideias_existentes>", recentes.map(r => "- " + r.titulo).join("\n"), "</ideias_existentes>", "",
     "<descartes_recentes>", recentes.filter(r => r.status === "Descartada").slice(0, 20).map(r => "- " + r.titulo + (r.motivo_descarte ? " (motivo: " + r.motivo_descarte + ")" : "")).join("\n"), "</descartes_recentes>", "",
-    "Gere 10 ideias. Em \"referencias\", use os códigos \"ref\" (c1, c2…) das referências que inspiraram cada ideia."].join("\n");
+    "Gere " + quantidade + " ideias." + (formatos.length ? " Use apenas estes formatos: " + formatos.join(", ") + "." : " Misture os formatos.") + (tema ? " Todas sobre o tema em <tema_pedido>." : "") +
+    " Em \"referencias\", use os códigos \"ref\" (c1, c2…) das referências que inspiraram cada ideia."].join("\n");
   const dados = await claude(org, { system: SISTEMA_IDEIAS, content: user, effort: "medium" });
   const norm = t => String(t || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim();
   const curto = t => norm(t).split(":")[0].trim();
@@ -78,7 +83,7 @@ registrar("ideias", async (org) => {
   let criadas = 0;
   for (const i of dados.ideias || []) {
     const pilar = pilares.length ? acharPilar(i.pilar) : i.pilar;
-    if (!i.titulo || !["Reels", "Carrossel", "Estatico", "Stories"].includes(i.formato)) continue;
+    if (!i.titulo || !(formatos.length ? formatos : FORMATOS).includes(i.formato)) continue;
     if (redes.length && !redes.includes(i.rede)) continue;
     if (pilares.length && !pilar) continue;
     const score = Math.max(0, Math.min(10, Number(i.score) || 0));
@@ -192,7 +197,17 @@ export async function publicarVencidos() {
   const { rows } = await db().query(`update posts set status = 'Publicando', atualizado_em = now()
     where id in (select id from posts where status = 'Agendado' and artes_prontas and data_publicacao <= now() + interval '1 minute' order by data_publicacao limit 10 for update skip locked)
     returning *`);
-  for (const p of rows) {
+  for (const p of rows) await publicarPost(p);
+}
+// "Publicar agora" do painel: só posts Agendados com as artes prontas.
+export async function publicarJa(org, id) {
+  const { rows } = await db().query(`update posts set status = 'Publicando', atualizado_em = now()
+    where id = $1 and org_id = $2 and status = 'Agendado' and artes_prontas returning *`, [id, org]);
+  if (rows[0]) setImmediate(() => publicarPost(rows[0]).catch(e => console.error("[publicar]", e)));
+  return !!rows[0];
+}
+async function publicarPost(p) {
+  {
     try {
       const a = await anexos(p.org_id, p.artes || []);
       const corpo = { post: [p.legenda, p.hashtags].filter(Boolean).join("\n\n"), platforms: [REDES[p.rede]].filter(Boolean), mediaUrls: (p.artes || []).map(id => a.get(id)).filter(Boolean).map(x => x.url) };

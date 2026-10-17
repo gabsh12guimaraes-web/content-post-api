@@ -216,3 +216,35 @@ test("importar do Airtable traz marca, fontes, ideias e calendário sem guardar 
   assert.equal(post.Ideia.length, 1);
   assert.equal(JSON.stringify(p).includes("patTESTE"), false);
 });
+
+test("buscar ideias guarda o pedido; mudar data e publicar agora", async () => {
+  assert.equal((await chamar({ acao: "buscarIdeias", tema: "golpes", quantidade: 5, formatos: ["Reels", "Inventado"] }, ana)).status, 200);
+  const t = (await db().query("select payload from tarefas where tipo = 'ideias' order by criado_em desc limit 1")).rows[0];
+  assert.deepEqual(t.payload, { tema: "golpes", quantidade: 5, formatos: ["Reels"] });
+  await db().query("delete from tarefas where tipo = 'ideias'");
+
+  await chamar({ acao: "salvarIntegracao", provedor: "ayrshare", valor: "ayr-teste-12345678" }, ana);
+  const i = (await db().query("insert into ideias (org_id, titulo, formato, rede, score) values ($1, 'Para publicar', 'Estatico', 'Instagram', 7) returning id", [anaOrg])).rows[0].id;
+  const { id } = await chamar({ acao: "agendarIdeia", id: i, data: new Date(Date.now() + 5 * 86400000).toISOString() }, ana);
+  const nova = new Date(Date.now() + 9 * 86400000).toISOString();
+  assert.equal((await chamar({ acao: "reagendarPost", id, data: nova }, bob)).status, 200);
+  assert.equal(new Date((await db().query("select data_publicacao from posts where id = $1", [id])).rows[0].data_publicacao).toISOString(), nova);
+  assert.equal((await chamar({ acao: "publicarAgora", id }, ana)).status, 400); // ainda não está agendado
+  await chamar({ acao: "salvarArtes", id, artes: [{ tipo: "image/jpeg", base64: JPG }] }, ana);
+  await db().query("update posts set status = 'Agendado' where id = $1", [id]);
+  const original = globalThis.fetch;
+  let corpoAyrshare = null;
+  globalThis.fetch = async (url, op = {}) => {
+    if (String(url).includes("api.ayrshare.com/api/post")) { corpoAyrshare = JSON.parse(op.body); return new Response(JSON.stringify({ status: "success", id: "ayr1", postIds: [{ postUrl: "https://instagram.com/p/teste" }] })); }
+    return original(url, op);
+  };
+  try {
+    assert.equal((await chamar({ acao: "publicarAgora", id }, ana)).status, 200);
+    for (let k = 0; k < 100; k++) { if ((await db().query("select status from posts where id = $1", [id])).rows[0].status !== "Publicando") break; await new Promise(r => setTimeout(r, 30)); }
+  } finally { globalThis.fetch = original; }
+  const p = (await db().query("select status, link_publicado from posts where id = $1", [id])).rows[0];
+  assert.equal(p.status, "Publicado");
+  assert.equal(p.link_publicado, "https://instagram.com/p/teste");
+  assert.deepEqual(corpoAyrshare.platforms, ["instagram"]);
+  assert.equal(corpoAyrshare.mediaUrls.length, 1);
+});

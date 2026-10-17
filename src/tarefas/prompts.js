@@ -12,6 +12,8 @@ Regras:
 7. Score de 0 a 10 mede aderência à marca E potencial de desempenho. Seja exigente: 9–10 só para ideias muito fortes.
 8. Equilibre os pilares: não entregue todas as ideias no mesmo pilar.
 9. Escreva no idioma indicado em <marca><idioma> (se vier vazio, português do Brasil).
+10. Se vier <tema_pedido>, todas as ideias giram em torno desse tema (ainda dentro dos pilares e do tom da marca). As referências servem de inspiração de formato e gancho.
+11. Se a mensagem disser quais formatos usar, use só esses formatos.
 
 Responda APENAS com um objeto JSON neste formato, sem texto antes ou depois:
 {"ideias":[{"titulo":"","resumo":"","formato":"Reels|Carrossel|Estatico|Stories","rede":"","pilar":"","score":0,"por_que_funciona":"","referencias":["c1"]}]}`;
