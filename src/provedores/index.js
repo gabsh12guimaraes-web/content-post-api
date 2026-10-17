@@ -161,7 +161,8 @@ export async function linkConexao(org, nomeRede, voltar) {
   const z = await zernioDe(org);
   if (z.modo !== "plataforma") throw new ErroIntegracao(SO_PELA_PROPRIA);
   const perfil = z.perfil || await criarPerfil(org, z);
-  const q = new URLSearchParams({ profileId: perfil });
+  // Pede só a permissão de publicar: a tela de autorização da rede mostra uma lista menor.
+  const q = new URLSearchParams({ profileId: perfil, scopes: "posting" });
   if (voltar) q.set("redirect_url", voltar);
   const r = await pedir(`${ZERNIO}/connect/${plataforma}?${q}`, { headers: cabecalho(z) });
   const url = r.json && r.json.authUrl;

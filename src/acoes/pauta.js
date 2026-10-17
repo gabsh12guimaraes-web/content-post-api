@@ -1,7 +1,7 @@
 // Marca, fontes, ideias e calendário da organização selecionada.
 import { db } from "../db.js";
 import { falha, exigirId, texto, UUID } from "../erros.js";
-import { salvarArquivo, guardarDeUrl, apagarArquivos } from "../arquivos.js";
+import { salvarArquivo, guardarDeUrl, apagarArquivos, anexos } from "../arquivos.js";
 import { marcaParaPainel, fonteParaPainel, ideiaParaPainel, postsParaPainel } from "../formato.js";
 import { enfileirar } from "../tarefas/fila.js";
 import { cifrar } from "../cripto.js";
@@ -80,6 +80,58 @@ export const acoesPauta = {
       if (antigo) await apagarArquivos(ctx.org, [antigo]);
     }
     return { id };
+  },
+
+  /* ---------- banco de imagens ---------- */
+  async listarBanco(ctx) {
+    const { rows } = await db().query("select * from banco_imagens where org_id = $1 order by criado_em desc", [ctx.org]);
+    const a = await anexos(ctx.org, rows.map(r => r.arquivo_id));
+    const tarefas = (await db().query("select payload->>'imagem' as id from tarefas where org_id = $1 and tipo = 'descreverImagem' and status in ('pendente', 'rodando')", [ctx.org])).rows.map(r => r.id);
+    return { imagens: rows.map(r => ({ id: r.id, nome: r.nome, descricao: r.descricao, tags: r.tags || [], arquivo: a.get(r.arquivo_id) || null, descrevendo: tarefas.includes(r.id) })).filter(x => x.arquivo) };
+  },
+  async enviarImagemBanco(ctx, b) {
+    if (!["image/png", "image/jpeg", "image/webp"].includes(b.tipo)) falha("Envie fotos em JPG, PNG ou WEBP.");
+    const total = (await db().query("select count(*)::int as n from banco_imagens where org_id = $1", [ctx.org])).rows[0].n;
+    if (total >= 300) falha("O banco de imagens aceita até 300 fotos. Remova algumas para enviar novas.");
+    const arquivo = await salvarArquivo(ctx.org, { tipo: b.tipo, nome: b.nome, dados: doBase64(b.base64, 8 * 1024 * 1024) });
+    const nome = texto(b.titulo, 80);
+    const { rows } = await db().query("insert into banco_imagens (org_id, arquivo_id, nome) values ($1, $2, $3) returning id", [ctx.org, arquivo, nome]);
+    // A IA descreve a foto em segundo plano (nome, descrição e etiquetas). Se não houver chave do Claude, fica para a pessoa preencher.
+    if (b.descrever !== false) await enfileirar(ctx.org, "descreverImagem", { imagem: rows[0].id }, ctx.usuario.id);
+    return { id: rows[0].id };
+  },
+  async salvarImagemBanco(ctx, b) {
+    const id = exigirId(b.id);
+    const tags = (Array.isArray(b.tags) ? b.tags : String(b.tags || "").split(",")).map(t => texto(t, 30)).filter(Boolean).slice(0, 8);
+    const r = await db().query("update banco_imagens set nome = $3, descricao = $4, tags = $5 where id = $1 and org_id = $2", [id, ctx.org, texto(b.nome, 80), texto(b.descricao, 400), tags]);
+    if (!r.rowCount) falha("Foto não encontrada.", 404);
+    return {};
+  },
+  async removerImagemBanco(ctx, b) {
+    const id = exigirId(b.id);
+    const r = (await db().query("delete from banco_imagens where id = $1 and org_id = $2 returning arquivo_id", [id, ctx.org])).rows[0];
+    if (!r) falha("Foto não encontrada.", 404);
+    // O arquivo só some se nenhum post estiver usando a foto.
+    const emUso = (await db().query("select 1 from posts where org_id = $1 and exists (select 1 from jsonb_each_text(fotos) f where f.value = $2::text) limit 1", [ctx.org, r.arquivo_id])).rows.length;
+    if (!emUso) await apagarArquivos(ctx.org, [r.arquivo_id]);
+    return {};
+  },
+  // Troca a foto de um slide por uma do banco, sem IA.
+  async trocarFotoSlide(ctx, b) {
+    const p = await postDaOrg(ctx.org, b.id);
+    if (["Publicando", "Publicado"].includes(p.status)) falha("Este post já foi publicado.");
+    const n = parseInt(b.slide, 10); if (!(n >= 1 && n <= 20)) falha("Slide inválido.");
+    const img = (await db().query("select arquivo_id from banco_imagens where id = $1 and org_id = $2", [exigirId(b.imagem), ctx.org])).rows[0];
+    if (!img) falha("Foto não encontrada no banco.", 404);
+    const fotos = { ...(p.fotos || {}) }, antiga = fotos[n];
+    fotos[n] = img.arquivo_id;
+    const marcar = lista => (Array.isArray(lista) ? lista : []).map((s, i) => ((Number(s.n) || i + 1) === n ? { ...s, usa_imagem: true } : s));
+    const conteudo = { ...(p.conteudo || {}) };
+    if (Array.isArray(conteudo.slides)) conteudo.slides = marcar(conteudo.slides);
+    await db().query("update posts set fotos = $2, slides = $3, conteudo = $4, artes_prontas = false, atualizado_em = now() where id = $1",
+      [p.id, JSON.stringify(fotos), JSON.stringify(marcar(p.slides)), JSON.stringify(conteudo)]);
+    if (antiga && antiga !== img.arquivo_id) await apagarArquivos(ctx.org, [antiga]);
+    return {};
   },
 
   async salvarFonte(ctx, b) {
@@ -303,6 +355,8 @@ export const acoesPauta = {
       cenas: r.cenas === "auto" ? "auto" : (Number(r.cenas) >= 2 && Number(r.cenas) <= 8 ? Number(r.cenas) : undefined),
       textoNaTela: um(r.textoNaTela, ["sim", "nao"]), observacoes: texto(r.observacoes, 1000) || undefined,
       story: um(r.story, ["imagem", "continuo", "varios"]),
+      imagens: um(r.imagens, ["ia", "banco", "misto"]),
+      banco: Array.isArray(r.banco) ? r.banco.filter(x => UUID.test(String(x))).slice(0, 20) : undefined,
     };
     Object.keys(br).forEach(k => br[k] === undefined && delete br[k]);
     await usar(ctx.org, "post");

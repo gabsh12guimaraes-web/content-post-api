@@ -41,7 +41,7 @@ export async function lerArquivo(id, chave) {
 
 export async function apagarArquivos(org, ids) {
   if (!ids.length) return;
-  const { rows } = await db().query("delete from arquivos where org_id = $1 and id = any($2::uuid[]) returning id", [org, ids]);
+  const { rows } = await db().query("delete from arquivos where org_id = $1 and id = any($2::uuid[]) and id not in (select arquivo_id from banco_imagens where org_id = $1) returning id", [org, ids]);
   await Promise.all(rows.map(r => fs.rm(caminho(org, r.id), { force: true })));
 }
 

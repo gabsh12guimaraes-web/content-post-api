@@ -42,12 +42,19 @@ Regras de imagem e vídeo (o Magnific gera; o texto e o logo entram depois, pela
 - Quando fizer sentido, puxe a direção de arte para as cores de <marca><cores> (fundo, luz, objetos), sem deixar a imagem artificial.
 - Se a mensagem trouxer imagens de mood board da marca, use-as como referência de estilo (paleta, luz, textura, enquadramento, clima) nos prompts de imagem e de vídeo. Não copie objetos, pessoas ou textos delas.
 
+Banco de imagens:
+- Se a mensagem trouxer <banco_de_imagens>, são fotos reais da marca (produtos, loja, equipe), cada uma com um código (b1, b2...) e uma descrição.
+- Para usar uma foto do banco num slide, coloque "imagem_banco": "b3" no slide (ou na cena, em Reels e Stories) e NÃO gere prompt de imagem para esse slide.
+- Escolha a foto que combina com o texto do slide. Não repita a mesma foto em slides seguidos, a não ser que o banco tenha poucas fotos.
+- Escreva o texto em cima do que a foto mostra de verdade (cor, modelo, tipo do produto). Não invente características que a descrição não traz.
+- Em cenas de vídeo com "imagem_banco", o "prompt_video" descreve um movimento suave sobre aquela foto (zoom lento, giro de câmera, tecido balançando), sem mudar o produto.
+
 Briefing:
 - Se a mensagem trouxer <briefing>, ele foi escolhido pela pessoa e tem prioridade sobre as regras de formato acima (quantidade de slides, capa, onde vai foto ou vídeo, duração, número de cenas). Nesse caso o limite de 3 slides em vídeo não vale.
 - Slide com vídeo sempre leva também "usa_imagem": true e um prompt de imagem (a imagem é o primeiro quadro do vídeo). Slide "só texto" leva "usa_imagem": false e "usa_video": false.
 
 Responda APENAS com um objeto JSON neste formato:
-{"legenda":"","hashtags":["#..."],"slides":[{"n":1,"titulo":"","texto":"","usa_imagem":true,"usa_video":false,"prompt_video":""}],"cenas":[{"n":1,"duracao_s":5,"visual":"","fala_ou_texto":"","prompt_video":""}],"prompts_imagem":[{"slide":1,"prompt":"","proporcao":"4:5"}]}
+{"legenda":"","hashtags":["#..."],"slides":[{"n":1,"titulo":"","texto":"","usa_imagem":true,"usa_video":false,"prompt_video":"","imagem_banco":""}],"cenas":[{"n":1,"duracao_s":5,"visual":"","fala_ou_texto":"","prompt_video":"","imagem_banco":""}],"prompts_imagem":[{"slide":1,"prompt":"","proporcao":"4:5"}]}
 "slides" é usado em Carrossel e Estatico; "cenas" em Reels e Stories. O que não se aplica vem como lista vazia.`;
 
 export const SISTEMA_AJUSTE = `Você está revisando um post da marca descrita em <marca>, a pedido da pessoa responsável pela marca.
@@ -96,6 +103,8 @@ export function briefingTexto(b, formato) {
     }
     if (b.textoNaTela === 'nao') L.push('- sem texto na tela: deixe "fala_ou_texto" vazio em todas as cenas');
   }
+  const img = { banco: 'todas as imagens vêm do <banco_de_imagens> ("imagem_banco" em cada slide ou cena com imagem); não gere prompts de imagem', misto: 'use o <banco_de_imagens> para mostrar os produtos e gere imagens com IA só para ambientação ou conceito' }[b.imagens];
+  if (img) L.push('- ' + img);
   const obj = { engajar: 'engajar (comentários, salvamentos, compartilhamentos)', educar: 'educar e tirar dúvidas', vender: 'converter: levar para compra ou cadastro', institucional: 'fortalecer a marca' }[b.objetivo];
   if (obj) L.push('- objetivo: ' + obj);
   if (b.observacoes) L.push('- observações da pessoa: ' + String(b.observacoes).slice(0, 1000));

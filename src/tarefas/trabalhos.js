@@ -97,6 +97,21 @@ registrar("ideias", async (org, pedido = {}) => {
   return { criadas, aviso };
 });
 
+registrar("descreverImagem", async (org, { imagem }) => {
+  const r = (await db().query("select b.*, a.tipo, a.chave from banco_imagens b join arquivos a on a.id = b.arquivo_id where b.id = $1 and b.org_id = $2", [imagem, org])).rows[0];
+  if (!r) return { ignorado: "imagem removida" };
+  const arq = await lerArquivo(r.arquivo_id, r.chave);
+  if (!arq || !["image/jpeg", "image/png", "image/webp", "image/gif"].includes(arq.tipo) || arq.dados.length > 3700000) return { ignorado: "formato ou tamanho fora do que o Claude lê" };
+  const c = await claude(org, {
+    system: 'Você descreve fotos do banco de imagens de uma marca para uma IA escolher a foto certa para cada post. Responda APENAS com JSON: {"nome":"até 5 palavras","descricao":"uma frase objetiva com o que aparece: produto, cor, material, modelo, cenário","tags":["até 6 palavras-chave curtas"]}. Em português do Brasil. Não invente marca, preço ou tamanho.',
+    content: [{ type: "image", source: { type: "base64", media_type: arq.tipo, data: arq.dados.toString("base64") } }, { type: "text", text: "Descreva esta foto." + (r.nome ? " Nome dado pela pessoa: " + r.nome : "") }],
+    effort: "low", max_tokens: 800,
+  });
+  await db().query("update banco_imagens set nome = case when nome = '' then $3 else nome end, descricao = case when descricao = '' then $4 else descricao end, tags = case when cardinality(tags) = 0 then $5 else tags end where id = $1 and org_id = $2",
+    [imagem, org, String(c.nome || "").slice(0, 80), String(c.descricao || "").slice(0, 400), (Array.isArray(c.tags) ? c.tags : []).map(t => String(t).slice(0, 30)).slice(0, 8)]);
+  return { ok: true };
+});
+
 /* ================= 2. Mídias do post: fotos (Mystic) e clipes (Kling 3) ================= */
 async function gerarMidias(org, post, c, regerar) {
   const video = ehVideo(post.formato, post);
@@ -118,7 +133,7 @@ async function gerarMidias(org, post, c, regerar) {
   }
   const a = await anexos(org, Object.values(fotos));
   const pedidos = video
-    ? (c.cenas || []).map((x, i) => ({ n: Number(x.n) || i + 1, prompt: x.prompt_video || x.visual || post.titulo, duracao: x.duracao_s, proporcao: "9:16" }))
+    ? (c.cenas || []).map((x, i) => { const n = Number(x.n) || i + 1, f = fotos[n] && a.get(fotos[n]); return { n, prompt: x.prompt_video || x.visual || post.titulo, duracao: x.duracao_s, proporcao: "9:16", ...(f ? { imagem: f.url } : {}) }; })
     : (c.slides || []).filter(x => x.usa_video && fotos[x.n] && a.get(fotos[x.n])).slice(0, 10)
       .map(x => ({ n: Number(x.n), prompt: x.prompt_video || x.titulo || post.titulo, duracao: 5, proporcao: "1:1", imagem: a.get(fotos[x.n]).url }));
   for (const p of pedidos) {
@@ -147,6 +162,29 @@ async function moodBoard(org, m) {
   return blocos;
 }
 
+// Fotos do banco que vão para o Claude: as escolhidas no briefing ou as mais recentes. Devolve o bloco de texto e o mapa código → arquivo.
+async function bancoParaPost(org, briefing) {
+  const modo = briefing && briefing.imagens;
+  if (!["banco", "misto"].includes(modo)) return { texto: "", mapa: {} };
+  const escolhidas = Array.isArray(briefing.banco) ? briefing.banco.filter(x => /^[0-9a-f-]{36}$/i.test(String(x))) : [];
+  const { rows } = escolhidas.length
+    ? await db().query("select * from banco_imagens where org_id = $1 and id = any($2::uuid[]) order by criado_em desc", [org, escolhidas])
+    : await db().query("select * from banco_imagens where org_id = $1 order by criado_em desc limit 40", [org]);
+  if (!rows.length) return { texto: "", mapa: {}, vazio: true };
+  const mapa = {};
+  const linhas = rows.map((r, i) => { const cod = "b" + (i + 1); mapa[cod] = r.arquivo_id; return `${cod}: ${[r.nome, r.descricao, (r.tags || []).join(", ")].filter(Boolean).join(" · ") || "foto sem descrição"}`; });
+  return { texto: ["<banco_de_imagens>", ...linhas, "</banco_de_imagens>"].join("\n"), mapa };
+}
+// Troca o código do banco (b3) pelo arquivo, nos slides ou cenas, e devolve as fotos já resolvidas.
+function aplicarBanco(c, mapa) {
+  const fotos = {};
+  for (const lista of [c.slides || [], c.cenas || []]) lista.forEach((s, i) => {
+    const arq = s && mapa[String(s.imagem_banco || "").trim()];
+    if (arq) { const n = Number(s.n) || i + 1; fotos[n] = arq; s.usa_imagem = true; }
+  });
+  if (Object.keys(fotos).length) c.prompts_imagem = (c.prompts_imagem || []).filter(p => !fotos[Number(p.slide)]);
+  return fotos;
+}
 registrar("criar", Object.assign(async (org, { post: id }) => {
   const post = await postDe(org, id);
   if (!post) return { ignorado: "post removido" };
@@ -154,15 +192,19 @@ registrar("criar", Object.assign(async (org, { post: id }) => {
   const ideia = post.ideia_id ? (await db().query("select * from ideias where id = $1", [post.ideia_id])).rows[0] : null;
   const user = [blocoMarca(m), "", "<post>", "titulo: " + post.titulo, "rede: " + (post.rede || ""), "formato: " + (post.formato || ""), "pilar: " + (post.pilar || ""),
     "data: " + new Date(post.data_publicacao).toISOString(), "</post>", "", "<ideia>", "resumo: " + ((ideia && ideia.resumo) || post.titulo), "por_que_funciona: " + ((ideia && ideia.por_que) || ""), "</ideia>", "", briefingTexto(post.briefing, post.formato)].join("\n");
+  const banco = await bancoParaPost(org, post.briefing);
+  if (banco.vazio) throw new Error("o banco de imagens está vazio. Envie fotos em Marca e fontes › Banco de imagens ou escolha gerar com IA");
+  const pedidoUsuario = banco.texto ? user + "\n\n" + banco.texto : user;
   const mood = await moodBoard(org, m);
-  const content = mood.length ? [{ type: "text", text: "Mood board da marca (referência de estilo):" }, ...mood, { type: "text", text: user }] : user;
+  const content = mood.length ? [{ type: "text", text: "Mood board da marca (referência de estilo):" }, ...mood, { type: "text", text: pedidoUsuario }] : pedidoUsuario;
   const c = await claude(org, { system: SISTEMA_POST, content, effort: "high" });
   const video = ehVideo(post.formato, post);
   await db().query("update posts set legenda = $2, hashtags = $3, slides = $4, conteudo = $5, atualizado_em = now() where id = $1",
     [post.id, c.legenda || "", (c.hashtags || []).join(" "), JSON.stringify(video ? c.cenas || [] : c.slides || []), JSON.stringify(c)]);
   // Começa do zero: apaga mídias de uma criação anterior.
   await apagarArquivos(org, [...Object.values(post.fotos || {}), ...Object.values(post.clipes || {}), ...(post.artes || [])]);
-  const r = await gerarMidias(org, { ...post, fotos: {}, clipes: {} }, c, null);
+  const doBanco = aplicarBanco(c, banco.mapa);
+  const r = await gerarMidias(org, { ...post, fotos: doBanco, clipes: {} }, c, null);
   await db().query("update posts set fotos = $2, clipes = $3, artes = '{}', artes_prontas = false, regerar = '{}', status = 'EmRevisao', erro = $4, atualizado_em = now() where id = $1",
     [post.id, JSON.stringify(r.fotos), JSON.stringify(r.clipes), avisoFalhas(r.falhas)]);
   return { fotos: Object.keys(r.fotos).length, clipes: Object.keys(r.clipes).length, falhas: r.falhas };

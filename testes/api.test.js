@@ -521,3 +521,53 @@ test("redes conectadas: um profile do Zernio por organização e cada uma public
     assert.equal((await chamar({ acao: "conectarRede", rede: "Instagram" }, fabio)).status, 400);
   } finally { globalThis.fetch = original; delete process.env.COBRANCA; delete process.env.PLATAFORMA_ZERNIO; }
 });
+
+test("banco de imagens: descreve, cria post só com fotos do banco, troca foto e protege o arquivo", async () => {
+  const original = globalThis.fetch, pedidos = [];
+  let corpoPost = null;
+  globalThis.fetch = async (url, op = {}) => {
+    pedidos.push(String(url));
+    const json = o => new Response(JSON.stringify(o), { headers: { "content-type": "application/json" } });
+    if (String(url).includes("anthropic.com")) {
+      const corpo = JSON.parse(op.body);
+      if (String(corpo.system).includes("banco de imagens de uma marca")) return json({ content: [{ type: "text", text: JSON.stringify({ nome: "Camiseta preta", descricao: "Camiseta preta oversized em fundo branco", tags: ["camiseta", "preta"] }) }], stop_reason: "end_turn" });
+      corpoPost = corpo;
+      return json({ content: [{ type: "text", text: JSON.stringify({ legenda: "Nova coleção", hashtags: ["#moda"], cenas: [], prompts_imagem: [{ slide: 1, prompt: "não deveria gerar", proporcao: "4:5" }],
+        slides: [{ n: 1, titulo: "Chegou", texto: "A preta que combina com tudo", usa_imagem: true, imagem_banco: "b1" }, { n: 2, titulo: "Garanta a sua", texto: "" }] }) }], stop_reason: "end_turn" });
+    }
+    return original(url, op);
+  };
+  try {
+    const env = await chamar({ acao: "enviarImagemBanco", tipo: "image/jpeg", nome: "camiseta.jpg", base64: JPG }, ana);
+    assert.equal(env.status, 200);
+    await puxar();
+    for (let k = 0; k < 60; k++) { const st = (await db().query("select status from tarefas where tipo = 'descreverImagem' order by criado_em desc limit 1")).rows[0].status; if (st === "feito" || st === "erro") break; await new Promise(r => setTimeout(r, 50)); }
+    let banco = (await chamar({ acao: "listarBanco" }, ana)).imagens;
+    const foto = banco.find(x => x.id === env.id);
+    assert.equal(foto.nome, "Camiseta preta");
+    assert.deepEqual(foto.tags, ["camiseta", "preta"]);
+
+    const i = (await db().query("insert into ideias (org_id, titulo, formato, rede, score) values ($1, 'Nova coleção', 'Carrossel', 'Instagram', 8) returning id", [anaOrg])).rows[0].id;
+    const { id } = await chamar({ acao: "agendarIdeia", id: i, data: new Date(Date.now() + 4 * 86400000).toISOString() }, ana);
+    assert.equal((await chamar({ acao: "criarPost", id, briefing: { imagens: "banco", banco: [env.id, "nao-e-uuid"] } }, ana)).status, 200);
+    await puxar();
+    for (let k = 0; k < 100; k++) { const st = (await db().query("select status from tarefas where tipo = 'criar' order by criado_em desc limit 1")).rows[0].status; if (st === "feito" || st === "erro") break; await new Promise(r => setTimeout(r, 50)); }
+    const t = (await db().query("select status, erro from tarefas where tipo = 'criar' order by criado_em desc limit 1")).rows[0];
+    assert.equal(t.status, "feito", t.erro || "");
+    const texto = JSON.stringify(corpoPost.messages[0].content);
+    assert.ok(texto.includes("<banco_de_imagens>") && texto.includes("b1: Camiseta preta"));
+    assert.ok(!pedidos.some(u => u.includes("/v1/ai/mystic")), "não gera imagem com IA");
+    const post = (await db().query("select fotos from posts where id = $1", [id])).rows[0];
+    assert.equal(post.fotos["1"], foto.arquivo.id);
+
+    // Trocar a foto do slide 2 por uma do banco, sem IA
+    assert.equal((await chamar({ acao: "trocarFotoSlide", id, slide: 2, imagem: env.id }, bob)).status, 200);
+    assert.equal((await db().query("select fotos from posts where id = $1", [id])).rows[0].fotos["2"], foto.arquivo.id);
+
+    // Remover do banco não apaga o arquivo que um post ainda usa
+    assert.equal((await chamar({ acao: "removerImagemBanco", id: env.id }, ana)).status, 200);
+    assert.equal((await db().query("select count(*)::int as n from arquivos where id = $1", [foto.arquivo.id])).rows[0].n, 1);
+    banco = (await chamar({ acao: "listarBanco" }, ana)).imagens;
+    assert.ok(!banco.some(x => x.id === env.id));
+  } finally { globalThis.fetch = original; }
+});
