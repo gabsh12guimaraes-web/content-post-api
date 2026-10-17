@@ -118,17 +118,20 @@ async function gerarMidias(org, post, c, regerar) {
   const fotos = { ...(post.fotos || {}) }, clipes = { ...(post.clipes || {}) };
   const velhos = [];
   const precisa = (mapa, n) => (regerar ? regerar.includes(n) : !mapa[n]);
-  let falhas = 0;
+  let falhas = 0, semCredito = false;
+  // Sem crédito no Magnific, não adianta tentar as outras imagens: conta como falha e segue.
+  const falhou = (tipo, e) => { if (e instanceof ErroIntegracao && /não está cadastrada/.test(e.message)) throw e; falhas++; if (/insufficient credits|sem cr[ée]dito/i.test(e.message)) semCredito = true; console.error("[" + tipo + "]", e.message); };
   if (!video) {
     for (const x of c.prompts_imagem || []) {
       const n = Number(x.slide);
       if (!n || !precisa(fotos, n)) continue;
+      if (semCredito) { falhas++; continue; }
       try {
         const url = await gerarFoto(org, x.prompt, x.proporcao);
         const id = await guardarDeUrl(org, url, `foto-${n}`);
         if (fotos[n]) velhos.push(fotos[n]);
         fotos[n] = id;
-      } catch (e) { if (e instanceof ErroIntegracao && /não está cadastrada/.test(e.message)) throw e; falhas++; console.error("[foto]", e.message); }
+      } catch (e) { falhou("foto", e); }
     }
   }
   const a = await anexos(org, Object.values(fotos));
@@ -138,16 +141,19 @@ async function gerarMidias(org, post, c, regerar) {
       .map(x => ({ n: Number(x.n), prompt: x.prompt_video || x.titulo || post.titulo, duracao: 5, proporcao: "1:1", imagem: a.get(fotos[x.n]).url }));
   for (const p of pedidos) {
     if (!precisa(clipes, p.n)) continue;
+    if (semCredito) { falhas++; continue; }
     try {
       const url = await gerarClipe(org, p);
       const id = await guardarDeUrl(org, url, `clipe-${p.n}.mp4`);
       if (clipes[p.n]) velhos.push(clipes[p.n]);
       clipes[p.n] = id;
-    } catch (e) { if (e instanceof ErroIntegracao && /não está cadastrada/.test(e.message)) throw e; falhas++; console.error("[clipe]", e.message); }
+    } catch (e) { falhou("clipe", e); }
   }
-  return { fotos, clipes, velhos, falhas };
+  return { fotos, clipes, velhos, falhas, semCredito };
 }
-const avisoFalhas = n => (n ? `${n} imagem(ns) ou clipe(s) não foram gerados pelo Magnific. Peça um ajuste para tentar de novo.` : null);
+const avisoFalhas = (n, semCredito) => (!n ? null : semCredito
+  ? `A conta do Magnific está sem créditos: ${n} imagem(ns) ou clipe(s) não foram gerados. Adicione créditos no Magnific e peça um ajuste com "Gerar uma imagem nova", ou use fotos do Banco de imagens.`
+  : `${n} imagem(ns) ou clipe(s) não foram gerados pelo Magnific. Peça um ajuste para tentar de novo.`);
 
 // Mood board vai em base64, lido direto do disco (o Claude não baixa links de terceiros).
 async function moodBoard(org, m) {
@@ -206,7 +212,7 @@ registrar("criar", Object.assign(async (org, { post: id }) => {
   const doBanco = aplicarBanco(c, banco.mapa);
   const r = await gerarMidias(org, { ...post, fotos: doBanco, clipes: {} }, c, null);
   await db().query("update posts set fotos = $2, clipes = $3, artes = '{}', artes_prontas = false, regerar = '{}', status = 'EmRevisao', erro = $4, atualizado_em = now() where id = $1",
-    [post.id, JSON.stringify(r.fotos), JSON.stringify(r.clipes), avisoFalhas(r.falhas)]);
+    [post.id, JSON.stringify(r.fotos), JSON.stringify(r.clipes), avisoFalhas(r.falhas, r.semCredito)]);
   return { fotos: Object.keys(r.fotos).length, clipes: Object.keys(r.clipes).length, falhas: r.falhas };
 }, {
   aoFalhar: async (org, { post }, e) => {
@@ -246,7 +252,7 @@ registrar("ajustar", Object.assign(async (org, { post: id, comentario, slide = 0
   await db().query(`update posts set legenda = $2, hashtags = $3, slides = $4, conteudo = $5, fotos = $6, clipes = $7, versao = versao + 1,
     artes_prontas = false, status = 'EmRevisao', erro = $8, atualizado_em = now() where id = $1`,
     [post.id, c.legenda || "", (c.hashtags || []).join(" "), JSON.stringify(video ? c.cenas || [] : c.slides || []), JSON.stringify(c),
-      JSON.stringify(r.fotos), JSON.stringify(r.clipes), avisoFalhas(r.falhas)]);
+      JSON.stringify(r.fotos), JSON.stringify(r.clipes), avisoFalhas(r.falhas, r.semCredito)]);
   await apagarArquivos(org, r.velhos);
   return { resumo: c.resumo_mudancas || "", refeitos: regerar.length };
 }, {

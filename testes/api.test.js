@@ -571,3 +571,25 @@ test("banco de imagens: descreve, cria post só com fotos do banco, troca foto e
     assert.ok(!banco.some(x => x.id === env.id));
   } finally { globalThis.fetch = original; }
 });
+
+test("sem crédito no Magnific: para de pedir e avisa com clareza", async () => {
+  const i = (await db().query("insert into ideias (org_id, titulo, formato, rede, score) values ($1, 'Sem crédito', 'Carrossel', 'Instagram', 6) returning id", [anaOrg])).rows[0].id;
+  const { id } = await chamar({ acao: "agendarIdeia", id: i, data: new Date(Date.now() + 6 * 86400000).toISOString() }, ana);
+  const original = globalThis.fetch; let pedidosMystic = 0;
+  globalThis.fetch = async (url, op = {}) => {
+    const json = (o, st = 200) => new Response(JSON.stringify(o), { status: st, headers: { "content-type": "application/json" } });
+    if (String(url).includes("anthropic.com")) return json({ content: [{ type: "text", text: JSON.stringify({ legenda: "L", hashtags: [], cenas: [],
+      slides: [1, 2, 3].map(n => ({ n, titulo: "S" + n, texto: "", usa_imagem: true })), prompts_imagem: [1, 2, 3].map(n => ({ slide: n, prompt: "p", proporcao: "4:5" })) }) }], stop_reason: "end_turn" });
+    if (String(url).endsWith("/v1/ai/mystic")) { pedidosMystic++; return json({ message: "Insufficient credits" }, 402); }
+    return original(url, op);
+  };
+  try {
+    assert.equal((await chamar({ acao: "criarPost", id }, ana)).status, 200);
+    await puxar();
+    for (let k = 0; k < 100; k++) { const st = (await db().query("select status from tarefas where tipo = 'criar' order by criado_em desc limit 1")).rows[0].status; if (st === "feito" || st === "erro") break; await new Promise(r => setTimeout(r, 50)); }
+  } finally { globalThis.fetch = original; }
+  const p = (await db().query("select status, erro from posts where id = $1", [id])).rows[0];
+  assert.equal(p.status, "EmRevisao");
+  assert.match(p.erro, /sem créditos: 3 imagem/);
+  assert.equal(pedidosMystic, 1, "não insiste depois do primeiro 'sem crédito'");
+});
