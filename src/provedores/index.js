@@ -89,6 +89,14 @@ export async function coletarApify(org, actor, input) {
 /* ---------- Zernio (publicação) ---------- */
 const ZERNIO = "https://zernio.com/api/v1";
 // Publica na hora: acha a conta da rede, cria o post com publishNow e acompanha até publicar ou falhar.
+// Nomes do painel para as plataformas do Zernio.
+const NOMES_REDE = { instagram: "Instagram", facebook: "Facebook", tiktok: "TikTok", twitter: "X", threads: "Threads", linkedin: "LinkedIn", youtube: "YouTube" };
+export async function redesConectadas(org) {
+  let chave; try { chave = await chaveDe(org, "zernio"); } catch (e) { return null; }
+  const r = await pedir(`${ZERNIO}/accounts`, { headers: { authorization: `Bearer ${chave}` } });
+  if (!r.ok) return null;
+  return [...new Set(((r.json && r.json.accounts) || []).filter(c => c.isActive !== false).map(c => NOMES_REDE[c.platform]).filter(Boolean))];
+}
 export async function publicarZernio(org, { rede, midias, legenda, opcoes, chave: idPedido }) {
   const chave = await chaveDe(org, "zernio");
   const h = { "content-type": "application/json", authorization: `Bearer ${chave}` };

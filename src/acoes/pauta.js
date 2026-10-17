@@ -6,7 +6,8 @@ import { marcaParaPainel, fonteParaPainel, ideiaParaPainel, postsParaPainel } fr
 import { enfileirar } from "../tarefas/fila.js";
 import { cifrar } from "../cripto.js";
 import { podeGerir } from "./conta.js";
-import { publicarJa } from "../tarefas/trabalhos.js";
+import { publicarJa, REDES_PUBLICACAO } from "../tarefas/trabalhos.js";
+import { redesConectadas } from "../provedores/index.js";
 import { usar } from "../planos.js";
 
 const LOGOS = ["Logo", "LogoDark", "SimboloLight", "SimboloDark"];
@@ -226,6 +227,18 @@ export const acoesPauta = {
       [p.id, JSON.stringify(slides), legenda, hashtags, JSON.stringify(conteudo)]);
     return {};
   },
+
+  // Redes onde o post vai ser publicado.
+  async salvarRedes(ctx, b) {
+    const p = await postDaOrg(ctx.org, b.id);
+    if (["Publicando", "Publicado"].includes(p.status)) falha("Este post já foi publicado.");
+    const redes = [...new Set((Array.isArray(b.redes) ? b.redes : []).filter(r => REDES_PUBLICACAO.includes(r)))];
+    if (!redes.length) falha("Escolha pelo menos uma rede.");
+    await db().query("update posts set redes = $2, atualizado_em = now() where id = $1", [p.id, redes]);
+    return { redes };
+  },
+  // Redes com conta conectada no Zernio da organização (o painel mostra só o que dá para usar).
+  async redesConectadas(ctx) { return { redes: await redesConectadas(ctx.org) }; },
 
   async ajustarPost(ctx, b) {
     const p = await postDaOrg(ctx.org, b.id);

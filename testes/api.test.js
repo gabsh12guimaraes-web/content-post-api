@@ -372,3 +372,28 @@ test("story em imagem estática gera 1 foto vertical e nenhum clipe", async () =
   assert.equal(p.Fotos.length, 1);
   assert.equal(JSON.parse(p.Briefing).story, "imagem");
 });
+
+test("cada rede recebe o texto e as mídias que aceita; escolher redes do post", async () => {
+  const { conteudoPara } = await import("../src/tarefas/trabalhos.js");
+  const fotos = Array.from({ length: 6 }, (_, i) => ({ type: "image", url: "https://x/" + i + ".jpg" }));
+  const longa = "palavra ".repeat(120).trim();
+  const post = { titulo: "Coisas que você não precisa mais fazer no bar", legenda: longa, hashtags: "#bar #pix", formato: "Carrossel" };
+  const x = conteudoPara("X", post, fotos);
+  assert.ok(x.legenda.length <= 280 && x.legenda.endsWith("…"));
+  assert.equal(x.midias.length, 4);
+  assert.ok(conteudoPara("Threads", post, fotos).legenda.length <= 500);
+  const tt = conteudoPara("TikTok", post, fotos);
+  assert.equal(tt.opcoes.tiktokSettings.media_type, "photo");
+  assert.ok(tt.legenda.length <= 90);
+  const ttv = conteudoPara("TikTok", { ...post, formato: "Reels" }, [{ type: "video", url: "https://x/v.mp4" }]);
+  assert.equal(ttv.opcoes.tiktokSettings.allow_duet, true);
+  assert.equal(conteudoPara("Facebook", { ...post, formato: "Reels" }, [{ type: "video", url: "https://x/v.mp4" }]).opcoes.contentType, "reel");
+  assert.ok(conteudoPara("X", { ...post, formato: "Stories" }, fotos).erro);
+  assert.equal(conteudoPara("Instagram", { ...post, formato: "Stories" }, fotos.slice(0, 1)).opcoes.contentType, "story");
+
+  const p = (await chamar({ acao: "pauta" }, ana)).posts.find(x => x.Status === "EmRevisao");
+  assert.deepEqual(p.Redes, [p.Rede]);
+  assert.equal((await chamar({ acao: "salvarRedes", id: p.id, redes: ["Instagram", "X", "Orkut", "X"] }, bob)).status, 200);
+  assert.deepEqual((await chamar({ acao: "pauta" }, ana)).posts.find(x => x.id === p.id).Redes, ["Instagram", "X"]);
+  assert.equal((await chamar({ acao: "salvarRedes", id: p.id, redes: [] }, bob)).status, 400);
+});

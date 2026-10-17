@@ -212,7 +212,37 @@ registrar("ajustar", Object.assign(async (org, { post: id, comentario, slide = 0
 }));
 
 /* ================= 4. Publicação na hora marcada ================= */
-const REDES = { Instagram: "instagram", TikTok: "tiktok", LinkedIn: "linkedin", YouTube: "youtube" };
+const REDES = { Instagram: "instagram", Facebook: "facebook", TikTok: "tiktok", X: "twitter", Threads: "threads", LinkedIn: "linkedin", YouTube: "youtube" };
+export const REDES_PUBLICACAO = Object.keys(REDES);
+// Corta o texto no limite da rede, sem partir palavra.
+const cortar = (t, n) => { t = String(t || "").trim(); if (t.length <= n) return t; const c = t.slice(0, n - 1); const i = c.lastIndexOf(" "); return (i > n * 0.6 ? c.slice(0, i) : c).replace(/[\s.,;:!?-]+$/, "") + "…"; };
+// O que cada rede recebe: texto no limite dela, as mídias que ela aceita e as opções do Zernio.
+export function conteudoPara(nome, p, midias) {
+  const legenda = [p.legenda, p.hashtags].filter(Boolean).join("\n\n");
+  const videos = midias.filter(m => m.type === "video"), imagens = midias.filter(m => m.type === "image");
+  const story = p.formato === "Stories";
+  if (story && !["Instagram", "Facebook"].includes(nome)) return { erro: "Stories só vão para o Instagram e o Facebook" };
+  switch (nome) {
+    case "Instagram": return { midias, legenda: story ? "" : legenda, opcoes: story ? { contentType: "story" } : null };
+    case "Facebook": {
+      const m = imagens.length && videos.length ? imagens : midias; // o Facebook não mistura fotos e vídeo
+      if (story) return { midias: m.slice(0, 1), legenda: "", opcoes: { contentType: "story" } };
+      if (p.formato === "Reels" && videos.length === 1 && !imagens.length) return { midias: videos, legenda, opcoes: { contentType: "reel", title: cortar(p.titulo, 100) } };
+      return { midias: m.slice(0, 10), legenda, opcoes: null };
+    }
+    case "X": return { midias: videos.length ? videos.slice(0, 1) : imagens.slice(0, 4), legenda: cortar(legenda, 280), opcoes: null };
+    case "Threads": return { midias: (imagens.length && videos.length ? imagens : midias).slice(0, 10), legenda: cortar(legenda, 500), opcoes: null };
+    case "TikTok": {
+      // A pessoa revisa a prévia e aprova no painel antes de publicar; as artes são feitas com IA.
+      const base = { privacy_level: "PUBLIC_TO_EVERYONE", allow_comment: true, content_preview_confirmed: true, express_consent_given: true };
+      if (videos.length) return { midias: videos.slice(0, 1), legenda: cortar(legenda, 2200), opcoes: { tiktokSettings: { ...base, allow_duet: true, allow_stitch: true, video_made_with_ai: true } } };
+      if (imagens.length) return { midias: imagens.slice(0, 35), legenda: cortar(p.titulo, 90), opcoes: { tiktokSettings: { ...base, media_type: "photo", photo_cover_index: 0, description: cortar(legenda, 4000), auto_add_music: true } } };
+      return { erro: "o TikTok precisa de vídeo ou fotos" };
+    }
+    case "YouTube": return videos.length ? { midias: videos.slice(0, 1), legenda, opcoes: { title: cortar(p.titulo, 100), visibility: "public" } } : { erro: "o YouTube precisa de vídeo" };
+    default: return { midias, legenda, opcoes: null };
+  }
+}
 export async function publicarVencidos() {
   // Marca como "Publicando" antes de chamar o Zernio, para não publicar duas vezes.
   const { rows } = await db().query(`update posts set status = 'Publicando', atualizado_em = now()
@@ -232,13 +262,22 @@ async function publicarPost(p) {
     try {
       const a = await anexos(p.org_id, p.artes || []);
       const midias = (p.artes || []).map(id => a.get(id)).filter(Boolean).map(x => ({ type: String(x.type).startsWith("video/") ? "video" : "image", url: x.url }));
-      const r = await publicarZernio(p.org_id, {
-        rede: REDES[p.rede], midias, legenda: p.formato === "Stories" ? "" : [p.legenda, p.hashtags].filter(Boolean).join("\n\n"),
-        opcoes: p.rede === "Instagram" && p.formato === "Stories" ? { contentType: "story" } : p.rede === "YouTube" ? { title: String(p.titulo).slice(0, 100), visibility: "public" } : null,
-        chave: `pauta-${p.id}-${p.versao}`,
-      });
-      await db().query("update posts set status = $2, link_publicado = $3, id_agendamento = $4, erro = $5, atualizado_em = now() where id = $1",
-        [p.id, r.ok ? "Publicado" : "Erro", r.link, r.id, r.ok ? null : "Falhou ao publicar: " + r.erro]);
+      // Uma publicação por rede: se uma falhar, as outras seguem.
+      const redes = (p.redes && p.redes.length ? p.redes : [p.rede]).filter(r => REDES[r]);
+      if (!redes.length) throw new Error("escolha pelo menos uma rede para publicar");
+      const links = { ...(p.links || {}) }, falhas = [], ids = [];
+      for (const nome of redes) {
+        if (links[nome]) continue; // já saiu nessa rede numa tentativa anterior
+        const c = conteudoPara(nome, p, midias);
+        if (c.erro) { falhas.push(`${nome}: ${c.erro}`); continue; }
+        const r = await publicarZernio(p.org_id, { rede: REDES[nome], midias: c.midias, legenda: c.legenda, opcoes: c.opcoes, chave: `pauta-${p.id}-${p.versao}-${REDES[nome]}` });
+        if (r.id) ids.push(r.id);
+        if (r.ok) links[nome] = r.link || "publicado"; else falhas.push(`${nome}: ${r.erro}`);
+      }
+      const saiu = Object.keys(links).length > 0;
+      const primeiro = Object.values(links).find(l => /^https?:/.test(l)) || null;
+      await db().query("update posts set status = $2, link_publicado = $3, id_agendamento = $4, erro = $5, links = $6, atualizado_em = now() where id = $1",
+        [p.id, saiu ? "Publicado" : "Erro", primeiro, ids.join(","), falhas.length ? (saiu ? "Não publicou em " : "Falhou ao publicar em ") + falhas.join(" · ").slice(0, 700) : null, JSON.stringify(links)]);
     } catch (e) {
       await db().query("update posts set status = 'Erro', erro = $2, atualizado_em = now() where id = $1", [p.id, "Falhou ao publicar: " + String(e.message).slice(0, 400)]);
     }
