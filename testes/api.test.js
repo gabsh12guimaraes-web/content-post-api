@@ -223,7 +223,7 @@ test("buscar ideias guarda o pedido; mudar data e publicar agora", async () => {
   assert.deepEqual(t.payload, { tema: "golpes", quantidade: 5, formatos: ["Reels"] });
   await db().query("delete from tarefas where tipo = 'ideias'");
 
-  await chamar({ acao: "salvarIntegracao", provedor: "ayrshare", valor: "ayr-teste-12345678" }, ana);
+  await chamar({ acao: "salvarIntegracao", provedor: "zernio", valor: "sk_zernio_teste_1234" }, ana);
   const i = (await db().query("insert into ideias (org_id, titulo, formato, rede, score) values ($1, 'Para publicar', 'Estatico', 'Instagram', 7) returning id", [anaOrg])).rows[0].id;
   const { id } = await chamar({ acao: "agendarIdeia", id: i, data: new Date(Date.now() + 5 * 86400000).toISOString() }, ana);
   const nova = new Date(Date.now() + 9 * 86400000).toISOString();
@@ -233,9 +233,13 @@ test("buscar ideias guarda o pedido; mudar data e publicar agora", async () => {
   await chamar({ acao: "salvarArtes", id, artes: [{ tipo: "image/jpeg", base64: JPG }] }, ana);
   await db().query("update posts set status = 'Agendado' where id = $1", [id]);
   const original = globalThis.fetch;
-  let corpoAyrshare = null;
+  let corpoZernio = null;
+  process.env.ZERNIO_INTERVALO_MS = "5";
   globalThis.fetch = async (url, op = {}) => {
-    if (String(url).includes("api.ayrshare.com/api/post")) { corpoAyrshare = JSON.parse(op.body); return new Response(JSON.stringify({ status: "success", id: "ayr1", postIds: [{ postUrl: "https://instagram.com/p/teste" }] })); }
+    const u = String(url);
+    if (u.endsWith("zernio.com/api/v1/accounts")) return new Response(JSON.stringify({ accounts: [{ _id: "acc1", platform: "instagram", username: "easypeasy", isActive: true }] }));
+    if (u.endsWith("zernio.com/api/v1/posts")) { corpoZernio = JSON.parse(op.body); return new Response(JSON.stringify({ message: "ok", post: { _id: "z1", status: "publishing", platforms: [{ platform: "instagram", status: "publishing" }] } }), { status: 201 }); }
+    if (u.endsWith("zernio.com/api/v1/posts/z1")) return new Response(JSON.stringify({ post: { _id: "z1", status: "published", platforms: [{ platform: "instagram", status: "published", platformPostUrl: "https://instagram.com/p/teste" }] } }));
     return original(url, op);
   };
   try {
@@ -245,6 +249,7 @@ test("buscar ideias guarda o pedido; mudar data e publicar agora", async () => {
   const p = (await db().query("select status, link_publicado from posts where id = $1", [id])).rows[0];
   assert.equal(p.status, "Publicado");
   assert.equal(p.link_publicado, "https://instagram.com/p/teste");
-  assert.deepEqual(corpoAyrshare.platforms, ["instagram"]);
-  assert.equal(corpoAyrshare.mediaUrls.length, 1);
+  assert.deepEqual(corpoZernio.platforms, [{ platform: "instagram", accountId: "acc1" }]);
+  assert.equal(corpoZernio.publishNow, true);
+  assert.deepEqual(corpoZernio.mediaItems.map(m => m.type), ["image"]);
 });

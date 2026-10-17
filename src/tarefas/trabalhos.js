@@ -1,6 +1,6 @@
 // O que antes rodava nos fluxos 01 (ideias), 03 e 05 (criação), 04 (ajuste) e 06 (publicação) do n8n.
 import { db } from "../db.js";
-import { claude, gerarFoto, gerarClipe, coletarApify, publicarAyrshare, chaveDe, ErroIntegracao } from "../provedores/index.js";
+import { claude, gerarFoto, gerarClipe, coletarApify, publicarZernio, chaveDe, ErroIntegracao } from "../provedores/index.js";
 import { guardarDeUrl, apagarArquivos, anexos } from "../arquivos.js";
 import { registrar } from "./fila.js";
 import { SISTEMA_IDEIAS, SISTEMA_POST, SISTEMA_AJUSTE, idiomaDe, briefingTexto } from "./prompts.js";
@@ -193,7 +193,7 @@ registrar("ajustar", Object.assign(async (org, { post: id, comentario }) => {
 /* ================= 4. Publicação na hora marcada ================= */
 const REDES = { Instagram: "instagram", TikTok: "tiktok", LinkedIn: "linkedin", YouTube: "youtube" };
 export async function publicarVencidos() {
-  // Marca como "Publicando" antes de chamar o Ayrshare, para não publicar duas vezes.
+  // Marca como "Publicando" antes de chamar o Zernio, para não publicar duas vezes.
   const { rows } = await db().query(`update posts set status = 'Publicando', atualizado_em = now()
     where id in (select id from posts where status = 'Agendado' and artes_prontas and data_publicacao <= now() + interval '1 minute' order by data_publicacao limit 10 for update skip locked)
     returning *`);
@@ -210,12 +210,12 @@ async function publicarPost(p) {
   {
     try {
       const a = await anexos(p.org_id, p.artes || []);
-      const corpo = { post: [p.legenda, p.hashtags].filter(Boolean).join("\n\n"), platforms: [REDES[p.rede]].filter(Boolean), mediaUrls: (p.artes || []).map(id => a.get(id)).filter(Boolean).map(x => x.url) };
-      if (ehVideo(p.formato)) corpo.isVideo = true;
-      if (p.rede === "Instagram" && p.formato === "Reels") corpo.instagramOptions = { reels: true, shareReelsFeed: true };
-      if (p.rede === "Instagram" && p.formato === "Stories") corpo.instagramOptions = { stories: true };
-      if (p.rede === "YouTube") corpo.youTubeOptions = { title: String(p.titulo).slice(0, 100), visibility: "public" };
-      const r = await publicarAyrshare(p.org_id, corpo);
+      const midias = (p.artes || []).map(id => a.get(id)).filter(Boolean).map(x => ({ type: String(x.type).startsWith("video/") ? "video" : "image", url: x.url }));
+      const r = await publicarZernio(p.org_id, {
+        rede: REDES[p.rede], midias, legenda: p.formato === "Stories" ? "" : [p.legenda, p.hashtags].filter(Boolean).join("\n\n"),
+        opcoes: p.rede === "Instagram" && p.formato === "Stories" ? { contentType: "story" } : p.rede === "YouTube" ? { title: String(p.titulo).slice(0, 100), visibility: "public" } : null,
+        chave: `pauta-${p.id}-${p.versao}`,
+      });
       await db().query("update posts set status = $2, link_publicado = $3, id_agendamento = $4, erro = $5, atualizado_em = now() where id = $1",
         [p.id, r.ok ? "Publicado" : "Erro", r.link, r.id, r.ok ? null : "Falhou ao publicar: " + r.erro]);
     } catch (e) {

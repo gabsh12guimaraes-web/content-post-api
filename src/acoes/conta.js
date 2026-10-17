@@ -11,7 +11,7 @@ export const PROVEDORES = {
   anthropic: { nome: "Claude (Anthropic)", uso: "Escreve ideias, posts e ajustes", onde: "console.anthropic.com › API Keys" },
   magnific: { nome: "Magnific (Freepik)", uso: "Gera as fotos e os clipes de vídeo", onde: "magnific.com › Developers › API key" },
   apify: { nome: "Apify", uso: "Coleta posts das fontes (Instagram e TikTok)", onde: "console.apify.com › Settings › API & Integrations" },
-  ayrshare: { nome: "Ayrshare", uso: "Publica nas redes na data agendada", onde: "app.ayrshare.com › API Key" },
+  zernio: { nome: "Zernio", uso: "Publica nas redes na data agendada (conecte o Instagram e as outras redes no Zernio)", onde: "zernio.com › Settings › API Keys" },
 };
 const emailOk = e => { const v = texto(e, 200).toLowerCase(); if (!EMAIL.test(v)) falha("Digite um e-mail válido."); return v; };
 const senhaOk = s => { if (typeof s !== "string" || s.length < 8 || s.length > 200) falha("A senha precisa ter pelo menos 8 caracteres."); return s; };

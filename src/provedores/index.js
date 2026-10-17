@@ -4,7 +4,7 @@ import { decifrar } from "../cripto.js";
 import { config } from "../config.js";
 
 export class ErroIntegracao extends Error {}
-const NOMES = { anthropic: "Claude", magnific: "Magnific", apify: "Apify", ayrshare: "Ayrshare" };
+const NOMES = { anthropic: "Claude", magnific: "Magnific", apify: "Apify", zernio: "Zernio" };
 
 export async function chaveDe(org, provedor) {
   const r = (await db().query("select valor_cifrado from integracoes where org_id = $1 and provedor = $2", [org, provedor])).rows[0];
@@ -80,15 +80,35 @@ export async function coletarApify(org, actor, input) {
   return Array.isArray(r.json) ? r.json : [];
 }
 
-/* ---------- Ayrshare (publicação) ---------- */
-export async function publicarAyrshare(org, corpo) {
-  const chave = await chaveDe(org, "ayrshare");
-  const r = await pedir("https://api.ayrshare.com/api/post", {
-    method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${chave}` }, body: JSON.stringify(corpo),
+/* ---------- Zernio (publicação) ---------- */
+const ZERNIO = "https://zernio.com/api/v1";
+// Publica na hora: acha a conta da rede, cria o post com publishNow e acompanha até publicar ou falhar.
+export async function publicarZernio(org, { rede, midias, legenda, opcoes, chave: idPedido }) {
+  const chave = await chaveDe(org, "zernio");
+  const h = { "content-type": "application/json", authorization: `Bearer ${chave}` };
+  const contas = await pedir(`${ZERNIO}/accounts`, { headers: h });
+  if (contas.status === 401 || contas.status === 403) return { ok: false, erro: "o Zernio recusou a chave. Confira em Integrações." };
+  const conta = ((contas.json && contas.json.accounts) || []).find(c => c.platform === rede && c.isActive !== false);
+  if (!conta) return { ok: false, erro: `nenhuma conta de ${rede || "rede"} conectada no Zernio` };
+  if (!midias.length) return { ok: false, erro: "o post não tem artes finais" };
+  const destino = { platform: rede, accountId: conta._id };
+  if (opcoes) destino.platformSpecificData = opcoes;
+  const r = await pedir(`${ZERNIO}/posts`, {
+    method: "POST", headers: { ...h, "x-request-id": idPedido },
+    body: JSON.stringify({ content: legenda, mediaItems: midias.slice(0, 10), platforms: [destino], publishNow: true }),
   }, 300000);
-  const j = r.json || {};
-  const ok = j.status === "success";
-  return { ok, link: (j.postIds || []).map(x => x.postUrl).filter(Boolean)[0] || null, id: j.id || "", erro: ok ? "" : JSON.stringify(j.errors || j.error || j.message || r.txt).slice(0, 500) };
+  const ler = j => { const post = (j && j.post) || {}; const p = (post.platforms || [])[0] || {}; return { post, p }; };
+  let { post, p } = ler(r.json);
+  if (!post._id) return { ok: false, erro: "o Zernio recusou o post: " + String((r.json && (r.json.error || r.json.message)) || r.txt).slice(0, 300) };
+  const intervalo = Number(process.env.ZERNIO_INTERVALO_MS) || 15000; // os testes encurtam a espera
+  for (let k = 0; k < 40 && !["published", "failed", "partial"].includes(post.status); k++) {
+    await esperar(intervalo);
+    const v = await pedir(`${ZERNIO}/posts/${post._id}`, { headers: h });
+    ({ post, p } = ler(v.json));
+    if (!post._id) break;
+  }
+  const ok = post.status === "published" || p.status === "published";
+  return { ok, link: p.platformPostUrl || null, id: post._id || "", erro: ok ? "" : String(p.errorMessage || "o Zernio não confirmou a publicação").slice(0, 400) };
 }
 
 /* ---------- teste das chaves (não gasta créditos) ---------- */
@@ -99,7 +119,7 @@ export async function testar(org, provedor) {
     anthropic: () => pedir("https://api.anthropic.com/v1/models?limit=1", { headers: { "x-api-key": chave, "anthropic-version": "2023-06-01" } }),
     magnific: () => pedir(MAGNIFIC + "/v1/ai/mystic", { headers: { "x-freepik-api-key": chave } }),
     apify: () => pedir("https://api.apify.com/v2/users/me", { headers: { authorization: `Bearer ${chave}` } }),
-    ayrshare: () => pedir("https://api.ayrshare.com/api/user", { headers: { authorization: `Bearer ${chave}` } }),
+    zernio: () => pedir(ZERNIO + "/accounts", { headers: { authorization: `Bearer ${chave}` } }),
   }[provedor];
   try {
     const r = await teste();

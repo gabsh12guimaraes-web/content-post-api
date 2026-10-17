@@ -1,5 +1,5 @@
 // Arquivos (logos, mood board, fotos, clipes, artes) ficam na pasta do Volume, um por id.
-// O link público /f/:id/:chave não exige login (o Ayrshare e o navegador precisam abrir), mas a chave é secreta.
+// O link público /f/:id/:chave não exige login (o Zernio e o navegador precisam abrir), mas a chave é secreta.
 import fs from "node:fs/promises";
 import path from "node:path";
 import { config } from "./config.js";
