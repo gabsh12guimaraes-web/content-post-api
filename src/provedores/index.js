@@ -122,15 +122,21 @@ export async function testar(org, provedor) {
   let chave;
   try { chave = await chaveDe(org, provedor); } catch (e) { return { ok: false, mensagem: e.message }; }
   const teste = {
-    anthropic: () => pedir("https://api.anthropic.com/v1/models?limit=1", { headers: { "x-api-key": chave, "anthropic-version": "2023-06-01" } }),
-    magnific: () => pedir(MAGNIFIC + "/v1/ai/mystic", { headers: { "x-freepik-api-key": chave } }),
+    // Conta os tokens de uma mensagem curta: não gasta crédito e confere a chave e o modelo usado pela plataforma.
+    anthropic: () => pedir("https://api.anthropic.com/v1/messages/count_tokens", {
+      method: "POST", headers: { "content-type": "application/json", "x-api-key": chave, "anthropic-version": "2023-06-01" },
+      body: JSON.stringify({ model: config.modeloClaude, messages: [{ role: "user", content: "oi" }] }) }),
+    // Consulta uma tarefa que não existe: a chave é conferida antes, então 404 quer dizer chave aceita.
+    magnific: () => pedir(MAGNIFIC + "/v1/ai/mystic/00000000-0000-0000-0000-000000000000", { headers: { "x-freepik-api-key": chave } }),
     apify: () => pedir("https://api.apify.com/v2/users/me", { headers: { authorization: `Bearer ${chave}` } }),
     zernio: () => pedir(ZERNIO + "/accounts", { headers: { authorization: `Bearer ${chave}` } }),
   }[provedor];
   try {
     const r = await teste();
-    if (r.ok) return { ok: true, mensagem: "Chave funcionando." };
+    if (r.ok || (provedor === "magnific" && r.status === 404)) return { ok: true, mensagem: "Chave funcionando." };
     if (r.status === 401 || r.status === 403) return { ok: false, mensagem: "A chave foi recusada. Confira se copiou inteira e se está ativa." };
-    return { ok: false, mensagem: `O serviço respondeu ${r.status}. Tente de novo em alguns minutos.` };
+    const motivo = String((r.json && ((r.json.error && (r.json.error.message || r.json.error)) || r.json.message)) || r.txt || "").replace(/s+/g, " ").slice(0, 220);
+    if (provedor === "anthropic" && r.status === 400 && /credit|balance/i.test(motivo)) return { ok: false, mensagem: "A chave funciona, mas a conta da Anthropic está sem créditos. Adicione créditos em console.anthropic.com › Billing." };
+    return { ok: false, mensagem: `O serviço respondeu ${r.status}${motivo ? ": " + motivo : ""}` };
   } catch (e) { return { ok: false, mensagem: "Não consegui falar com o serviço agora." }; }
 }
