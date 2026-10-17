@@ -135,7 +135,8 @@ export async function testar(org, provedor) {
     const r = await teste();
     if (r.ok || (provedor === "magnific" && r.status === 404)) return { ok: true, mensagem: "Chave funcionando." };
     if (r.status === 401 || r.status === 403) return { ok: false, mensagem: "A chave foi recusada. Confira se copiou inteira e se está ativa." };
-    const motivo = String((r.json && ((r.json.error && (r.json.error.message || r.json.error)) || r.json.message)) || r.txt || "").replace(/s+/g, " ").slice(0, 220);
+    const motivo = String((r.json && ((r.json.error && (r.json.error.message || r.json.error)) || r.json.message)) || r.txt || "").replace(/\s+/g, " ").slice(0, 220);
+    if (provedor === "anthropic" && /workspace/i.test(motivo)) return { ok: false, mensagem: "Esta chave não está ligada a um workspace da Anthropic. No console.anthropic.com, abra Settings › Workspaces, entre em um workspace (pode ser o Default), crie a chave em API keys e cole aqui." };
     if (provedor === "anthropic" && r.status === 400 && /credit|balance/i.test(motivo)) return { ok: false, mensagem: "A chave funciona, mas a conta da Anthropic está sem créditos. Adicione créditos em console.anthropic.com › Billing." };
     return { ok: false, mensagem: `O serviço respondeu ${r.status}${motivo ? ": " + motivo : ""}` };
   } catch (e) { return { ok: false, mensagem: "Não consegui falar com o serviço agora." }; }
