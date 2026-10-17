@@ -33,7 +33,7 @@ export const acoesPauta = {
 
   async salvarMarca(ctx, b) {
     const c = b.campos || {};
-    const map = { Nome: "nome", Posicionamento: "posicionamento", Publico: "publico", TomDeVoz: "tom_de_voz", Evitar: "evitar", ExemplosBons: "exemplos", Cores: "cores", Idioma: "idioma" };
+    const map = { Nome: "nome", Posicionamento: "posicionamento", Publico: "publico", TomDeVoz: "tom_de_voz", Evitar: "evitar", ExemplosBons: "exemplos", Cores: "cores", Idioma: "idioma", Perfil: "perfil" };
     const sets = [], vals = [ctx.org];
     const por = (col, v) => { vals.push(v); sets.push(`${col} = $${vals.length}`); };
     for (const [k, col] of Object.entries(map)) if (c[k] !== undefined) por(col, texto(c[k], 5000));
@@ -184,7 +184,14 @@ export const acoesPauta = {
   async salvarDiagramacao(ctx, b) {
     const p = await postDaOrg(ctx.org, b.id);
     const d = b.diagramacao || {};
-    const diag = { alinhar: ["esquerda", "centro", "direita"].includes(d.alinhar) ? d.alinhar : "esquerda", posicao: ["auto", "topo", "meio", "base"].includes(d.posicao) ? d.posicao : "auto" };
+    const um = (v, lista) => (lista.includes(v) ? v : lista[0]);
+    const diag = {
+      alinhar: um(d.alinhar, ["esquerda", "centro", "direita"]),
+      posicao: um(d.posicao, ["auto", "topo", "meio", "base"]),
+      modelo: um(d.modelo, ["foto", "claro", "escuro", "lateral"]),
+      logo: um(d.logo, ["auto", "light", "dark", "simLight", "simDark", "nenhum"]),
+      logoPos: um(d.logoPos, ["te", "tc", "td", "be", "bc", "bd"]),
+    };
     await db().query("update posts set diagramacao = $2, artes_prontas = case when $3 then false else artes_prontas end, atualizado_em = now() where id = $1", [p.id, JSON.stringify(diag), !!b.refazer]);
     return {};
   },

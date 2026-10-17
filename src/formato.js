@@ -12,7 +12,7 @@ export async function marcaParaPainel(m) {
   return {
     id: m.org_id, Nome: m.nome, Posicionamento: m.posicionamento, Publico: m.publico, TomDeVoz: m.tom_de_voz,
     Pilares: m.pilares || [], Evitar: m.evitar, Redes: m.redes || [], FrequenciaSemanal: m.frequencia_semanal,
-    ExemplosBons: m.exemplos, Cores: m.cores, Idioma: m.idioma,
+    ExemplosBons: m.exemplos, Cores: m.cores, Idioma: m.idioma, Perfil: m.perfil,
     ...Object.fromEntries(LOGOS.map(k => [k, lista((m.logos || {})[k])])),
     MoodBoard: (m.mood_board || []).map(id => a.get(id)).filter(Boolean),
   };
