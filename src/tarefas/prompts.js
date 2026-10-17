@@ -29,6 +29,7 @@ Regras de texto:
 6. Escreva no idioma indicado em <marca><idioma> (se vier vazio, português do Brasil), sem erros.
 
 Regras por formato:
+- Destaque: no "titulo" de cada slide você pode marcar de 1 a 3 palavras-chave entre asteriscos para elas aparecerem em destaque na arte (ex.: "Homem-Aranha é uma *aula* de design"). Use só no título, nunca na legenda nem nas hashtags.
 - Carrossel: de 5 a 10 slides. Slide 1 = gancho. Último slide = CTA. Cada slide tem "titulo" (até 8 palavras) e "texto" (até 30 palavras). Até 3 slides podem ser em vídeo ("usa_video": true): só quando movimento ajuda a contar a história. Slide em vídeo também precisa de imagem (é a imagem que ganha movimento).
 - Estatico: 1 slide com "titulo" e "texto".
 - Reels/Stories: de 3 a 6 cenas, somando no máximo 30 segundos. Cada cena tem "duracao_s" (inteiro de 3 a 10), "visual" (o que aparece, em português), "fala_ou_texto" (texto curto que aparece na tela, até 12 palavras) e "prompt_video" (em inglês).
