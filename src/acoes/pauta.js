@@ -189,7 +189,8 @@ export const acoesPauta = {
     const diag = {
       alinhar: um(d.alinhar, ["esquerda", "centro", "direita"]),
       posicao: um(d.posicao, ["auto", "topo", "meio", "base"]),
-      modelo: um(d.modelo, ["foto", "claro", "escuro", "lateral"]),
+      modelo: um(d.modelo, ["foto", "editorial", "lateral", "claro", "escuro"]),
+      fundo: um(d.fundo, ["claro", "escuro"]),
       logo: um(d.logo, ["auto", "light", "dark", "simLight", "simDark", "nenhum"]),
       logoPos: um(d.logoPos, ["te", "tc", "td", "be", "bc", "bd"]),
     };
