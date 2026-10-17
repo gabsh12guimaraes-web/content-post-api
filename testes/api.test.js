@@ -293,3 +293,44 @@ test("planos: limite do teste, aviso da Kiwify ativa o plano e assinatura falsa 
     assert.match(p.planos[0].ciclos[0].checkout || "sem-link", /sem-link|sck=/);
   } finally { delete process.env.COBRANCA; delete process.env.KIWIFY_TOKEN; }
 });
+
+test("editar textos depois de pronto e ajustar um slide só", async () => {
+  const p0 = (await chamar({ acao: "pauta" }, ana)).posts.find(x => x.Legenda === "Legenda" && x.Status === "EmRevisao");
+  assert.ok(p0, "post do teste de criação");
+  const brutos = JSON.parse(p0.Slides);
+  brutos[0].titulo = "Capa editada"; brutos[0].prompt_secreto = "não deveria entrar";
+  assert.equal((await chamar({ acao: "salvarTextos", id: p0.id, slides: brutos, legenda: "Legenda nova", hashtags: "#x #y" }, bob)).status, 200);
+  let p = (await chamar({ acao: "pauta" }, ana)).posts.find(x => x.id === p0.id);
+  const s1 = JSON.parse(p.Slides);
+  assert.equal(s1[0].titulo, "Capa editada");
+  assert.equal(s1[0].usa_imagem, true, "mantém os outros campos do slide");
+  assert.equal(s1[0].prompt_secreto, undefined, "não aceita campos novos");
+  assert.equal(p.Legenda, "Legenda nova");
+
+  const original = globalThis.fetch, pedidos = [];
+  globalThis.fetch = async (url, op = {}) => {
+    pedidos.push(String(url));
+    if (String(url).includes("anthropic.com")) return new Response(JSON.stringify({ content: [{ type: "text", text: JSON.stringify({
+      legenda: "Claude mudou a legenda", hashtags: ["#z"], cenas: [], prompts_imagem: [{ slide: 1, prompt: "outra", proporcao: "4:5" }],
+      slides: [{ n: 1, titulo: "Claude mudou a capa", texto: "x", usa_imagem: true }, { n: 2, titulo: "Fim novo", texto: "agora com texto" }],
+      alterou_legenda: true, alterou_slides: [1, 2], alterou_imagens: [1], resumo_mudancas: "mudou tudo" }) }], stop_reason: "end_turn" }), { headers: { "content-type": "application/json" } });
+    return original(url, op);
+  };
+  try {
+    assert.equal((await chamar({ acao: "ajustarPost", id: p0.id, comentario: "[Ajuste somente no slide 2.] melhore o fim", slide: 2 }, bob)).status, 200);
+    await puxar();
+    for (let k = 0; k < 100; k++) {
+      const st = (await db().query("select status from tarefas where tipo = 'ajustar' order by criado_em desc limit 1")).rows[0].status;
+      if (st === "feito" || st === "erro") break;
+      await new Promise(r => setTimeout(r, 50));
+    }
+  } finally { globalThis.fetch = original; }
+  const t = (await db().query("select status, erro from tarefas where tipo = 'ajustar' order by criado_em desc limit 1")).rows[0];
+  assert.equal(t.status, "feito", t.erro || "");
+  p = (await chamar({ acao: "pauta" }, ana)).posts.find(x => x.id === p0.id);
+  const s2 = JSON.parse(p.Slides);
+  assert.equal(s2[0].titulo, "Capa editada", "slide 1 não muda");
+  assert.equal(s2[1].titulo, "Fim novo", "slide 2 muda");
+  assert.equal(p.Legenda, "Legenda nova", "legenda não muda");
+  assert.ok(!pedidos.some(u => u.includes("/v1/ai/mystic")), "não gera imagem de outro slide");
+});

@@ -207,6 +207,25 @@ export const acoesPauta = {
     return {};
   },
 
+  // Textos editados no painel depois do post pronto. Mantém os outros campos de cada slide (prompt, usa_imagem...).
+  async salvarTextos(ctx, b) {
+    const p = await postDaOrg(ctx.org, b.id);
+    if (!["EmRevisao", "Agendado", "Erro"].includes(p.status)) falha("Este post não pode ser editado agora.");
+    const novos = Array.isArray(b.slides) ? b.slides.slice(0, 12) : [];
+    if (!novos.length) falha("Slides inválidos.");
+    const atuais = Array.isArray(p.slides) ? p.slides : [];
+    const slides = novos.map((n, i) => {
+      const num = Number(n && n.n) || i + 1;
+      const velho = atuais.find((x, k) => (Number(x.n) || k + 1) === num) || { n: num };
+      return { ...velho, titulo: texto(n && n.titulo, 300), texto: texto(n && n.texto, 1500) };
+    });
+    const legenda = texto(b.legenda, 2200), hashtags = texto(b.hashtags, 600);
+    const conteudo = { ...(p.conteudo || {}), slides, legenda, hashtags: hashtags.split(/s+/).filter(Boolean) };
+    await db().query("update posts set slides = $2, legenda = $3, hashtags = $4, conteudo = $5, artes_prontas = false, atualizado_em = now() where id = $1",
+      [p.id, JSON.stringify(slides), legenda, hashtags, JSON.stringify(conteudo)]);
+    return {};
+  },
+
   async ajustarPost(ctx, b) {
     const p = await postDaOrg(ctx.org, b.id);
     const comentario = texto(b.comentario, 2000);
@@ -215,7 +234,9 @@ export const acoesPauta = {
     if (p.versao - 1 >= LIMITE_AJUSTES) falha(`Este post já teve ${p.versao - 1} ajustes. Remova do calendário e agende a ideia de novo para refazer do zero.`);
     await db().query("update posts set status = 'Ajustes', historico_ajustes = trim(historico_ajustes || E'\\n' || $2), atualizado_em = now() where id = $1", [p.id, `v${p.versao}: ${comentario}`]);
     await db().query("insert into revisoes (org_id, post_id, versao, decisao, comentario, usuario_id) values ($1, $2, $3, 'PediuAjuste', $4, $5)", [ctx.org, p.id, p.versao, comentario, ctx.usuario.id]);
-    await enfileirar(ctx.org, "ajustar", { post: p.id, comentario }, ctx.usuario.id);
+    // Ajuste em um slide só: o trabalho garante que os outros slides, a legenda e as hashtags não mudam.
+    const slide = Math.max(0, Math.min(20, parseInt(b.slide, 10) || 0));
+    await enfileirar(ctx.org, "ajustar", { post: p.id, comentario, slide, novaImagem: !!b.novaImagem }, ctx.usuario.id);
     return {};
   },
 

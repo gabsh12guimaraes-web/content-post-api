@@ -173,7 +173,7 @@ registrar("criar", Object.assign(async (org, { post: id }) => {
 }));
 
 /* ================= 3. Ajuste pedido na revisão ================= */
-registrar("ajustar", Object.assign(async (org, { post: id, comentario }) => {
+registrar("ajustar", Object.assign(async (org, { post: id, comentario, slide = 0, novaImagem = false }) => {
   const post = await postDe(org, id);
   if (!post) return { ignorado: "post removido" };
   const m = await marcaDe(org);
@@ -183,7 +183,21 @@ registrar("ajustar", Object.assign(async (org, { post: id, comentario }) => {
     "<historico>", post.historico_ajustes || "", "</historico>", "", "<comentario>", comentario, "</comentario>"].join("\n");
   const c = await claude(org, { system: SISTEMA_AJUSTE, content: user, effort: "medium" });
   const video = ehVideo(post.formato);
-  const regerar = (video && !(c.alterou_imagens || []).length ? c.alterou_slides : c.alterou_imagens || []).map(Number).filter(Boolean);
+  let regerar = (video && !(c.alterou_imagens || []).length ? c.alterou_slides : c.alterou_imagens || []).map(Number).filter(Boolean);
+  if (novaImagem && !slide) regerar = [...new Set(regerar.concat((c.slides || c.cenas || []).filter(s => s.usa_imagem || s.usa_video || video).map((s, i) => Number(s.n) || i + 1)))];
+  if (slide) {
+    // Só o slide escolhido muda: o resto volta a ser o da versão atual.
+    const chave = video ? "cenas" : "slides";
+    const velhos = atual[chave] || [], novos = c[chave] || [];
+    const num = (s, i) => Number(s && s.n) || i + 1;
+    c[chave] = velhos.map((v, i) => num(v, i) === slide ? (novos.find((n, k) => num(n, k) === slide) || v) : v);
+    if (atual.prompts_imagem && c.prompts_imagem && typeof atual.prompts_imagem === "object") {
+      const pa = atual.prompts_imagem, pn = c.prompts_imagem;
+      c.prompts_imagem = Array.isArray(pa) ? pa.map((x, i) => (num(x, i) === slide ? (Array.isArray(pn) ? pn.find((y, k) => num(y, k) === slide) : null) || x : x)) : { ...pa, [slide]: pn[slide] ?? pa[slide] };
+    }
+    c.legenda = atual.legenda; c.hashtags = atual.hashtags;
+    regerar = novaImagem ? [slide] : regerar.filter(n => n === slide);
+  }
   const r = await gerarMidias(org, post, c, regerar);
   await db().query(`update posts set legenda = $2, hashtags = $3, slides = $4, conteudo = $5, fotos = $6, clipes = $7, versao = versao + 1,
     artes_prontas = false, status = 'EmRevisao', erro = $8, atualizado_em = now() where id = $1`,
