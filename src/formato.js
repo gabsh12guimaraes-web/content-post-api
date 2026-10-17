@@ -40,7 +40,7 @@ export async function postsParaPainel(org, posts) {
       Fotos: fotos, ImagensSlides: JSON.stringify(Object.fromEntries(nf.map(n => [n, (a.get(p.fotos[n]) || {}).url || ""]))),
       Clipes: clipes, ClipesSlides: JSON.stringify(Object.fromEntries(nc.map(n => [n, (a.get(p.clipes[n]) || {}).url || ""]))),
       Arquivos: (p.artes || []).map(id => a.get(id)).filter(Boolean), ArtesProntas: p.artes_prontas,
-      Ideia: p.ideia_id ? [p.ideia_id] : [], Diagramacao: JSON.stringify(p.diagramacao || {}),
+      Ideia: p.ideia_id ? [p.ideia_id] : [], Briefing: p.briefing ? JSON.stringify(p.briefing) : "", Diagramacao: JSON.stringify(p.diagramacao || {}),
     };
   });
 }

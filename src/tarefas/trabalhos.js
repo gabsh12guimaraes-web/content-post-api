@@ -3,7 +3,8 @@ import { db } from "../db.js";
 import { claude, gerarFoto, gerarClipe, coletarApify, publicarAyrshare, chaveDe, ErroIntegracao } from "../provedores/index.js";
 import { guardarDeUrl, apagarArquivos, anexos } from "../arquivos.js";
 import { registrar } from "./fila.js";
-import { SISTEMA_IDEIAS, SISTEMA_POST, SISTEMA_AJUSTE, idiomaDe } from "./prompts.js";
+import { SISTEMA_IDEIAS, SISTEMA_POST, SISTEMA_AJUSTE, idiomaDe, briefingTexto } from "./prompts.js";
+import { lerArquivo } from "../arquivos.js";
 
 const ehVideo = formato => ["Reels", "Stories"].includes(formato);
 const marcaDe = async org => (await db().query("select * from marcas where org_id = $1", [org])).rows[0] || { org_id: org, pilares: [], redes: [], mood_board: [] };
@@ -110,7 +111,7 @@ async function gerarMidias(org, post, c, regerar) {
   const a = await anexos(org, Object.values(fotos));
   const pedidos = video
     ? (c.cenas || []).map((x, i) => ({ n: Number(x.n) || i + 1, prompt: x.prompt_video || x.visual || post.titulo, duracao: x.duracao_s, proporcao: "9:16" }))
-    : (c.slides || []).filter(x => x.usa_video && fotos[x.n] && a.get(fotos[x.n])).slice(0, 3)
+    : (c.slides || []).filter(x => x.usa_video && fotos[x.n] && a.get(fotos[x.n])).slice(0, 10)
       .map(x => ({ n: Number(x.n), prompt: x.prompt_video || x.titulo || post.titulo, duracao: 5, proporcao: "1:1", imagem: a.get(fotos[x.n]).url }));
   for (const p of pedidos) {
     if (!precisa(clipes, p.n)) continue;
@@ -125,9 +126,17 @@ async function gerarMidias(org, post, c, regerar) {
 }
 const avisoFalhas = n => (n ? `${n} imagem(ns) ou clipe(s) não foram gerados pelo Magnific. Peça um ajuste para tentar de novo.` : null);
 
-async function conteudoDaMarca(org, m) {
+// Mood board vai em base64, lido direto do disco (o Claude não baixa links de terceiros).
+async function moodBoard(org, m) {
   const a = await anexos(org, m.mood_board || []);
-  return (m.mood_board || []).slice(0, 6).map(id => a.get(id)).filter(Boolean).map(x => x.url);
+  const blocos = [];
+  for (const id of (m.mood_board || []).slice(0, 6)) {
+    const x = a.get(id); if (!x) continue;
+    const arq = await lerArquivo(id, new URL(x.url).pathname.split("/").pop());
+    if (!arq || !["image/jpeg", "image/png", "image/webp", "image/gif"].includes(arq.tipo) || arq.dados.length > 3700000) continue;
+    blocos.push({ type: "image", source: { type: "base64", media_type: arq.tipo, data: arq.dados.toString("base64") } });
+  }
+  return blocos;
 }
 
 registrar("criar", Object.assign(async (org, { post: id }) => {
@@ -136,9 +145,9 @@ registrar("criar", Object.assign(async (org, { post: id }) => {
   const m = await marcaDe(org);
   const ideia = post.ideia_id ? (await db().query("select * from ideias where id = $1", [post.ideia_id])).rows[0] : null;
   const user = [blocoMarca(m), "", "<post>", "titulo: " + post.titulo, "rede: " + (post.rede || ""), "formato: " + (post.formato || ""), "pilar: " + (post.pilar || ""),
-    "data: " + new Date(post.data_publicacao).toISOString(), "</post>", "", "<ideia>", "resumo: " + ((ideia && ideia.resumo) || post.titulo), "por_que_funciona: " + ((ideia && ideia.por_que) || ""), "</ideia>"].join("\n");
-  const mood = await conteudoDaMarca(org, m);
-  const content = mood.length ? [{ type: "text", text: "Mood board da marca (referência de estilo):" }, ...mood.map(url => ({ type: "image", source: { type: "url", url } })), { type: "text", text: user }] : user;
+    "data: " + new Date(post.data_publicacao).toISOString(), "</post>", "", "<ideia>", "resumo: " + ((ideia && ideia.resumo) || post.titulo), "por_que_funciona: " + ((ideia && ideia.por_que) || ""), "</ideia>", "", briefingTexto(post.briefing, post.formato)].join("\n");
+  const mood = await moodBoard(org, m);
+  const content = mood.length ? [{ type: "text", text: "Mood board da marca (referência de estilo):" }, ...mood, { type: "text", text: user }] : user;
   const c = await claude(org, { system: SISTEMA_POST, content, effort: "high" });
   const video = ehVideo(post.formato);
   await db().query("update posts set legenda = $2, hashtags = $3, slides = $4, conteudo = $5, atualizado_em = now() where id = $1",

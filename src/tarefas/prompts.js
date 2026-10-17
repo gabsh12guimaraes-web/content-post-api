@@ -40,6 +40,10 @@ Regras de imagem e vídeo (o Magnific gera; o texto e o logo entram depois, pela
 - Quando fizer sentido, puxe a direção de arte para as cores de <marca><cores> (fundo, luz, objetos), sem deixar a imagem artificial.
 - Se a mensagem trouxer imagens de mood board da marca, use-as como referência de estilo (paleta, luz, textura, enquadramento, clima) nos prompts de imagem e de vídeo. Não copie objetos, pessoas ou textos delas.
 
+Briefing:
+- Se a mensagem trouxer <briefing>, ele foi escolhido pela pessoa e tem prioridade sobre as regras de formato acima (quantidade de slides, capa, onde vai foto ou vídeo, duração, número de cenas). Nesse caso o limite de 3 slides em vídeo não vale.
+- Slide com vídeo sempre leva também "usa_imagem": true e um prompt de imagem (a imagem é o primeiro quadro do vídeo). Slide "só texto" leva "usa_imagem": false e "usa_video": false.
+
 Responda APENAS com um objeto JSON neste formato:
 {"legenda":"","hashtags":["#..."],"slides":[{"n":1,"titulo":"","texto":"","usa_imagem":true,"usa_video":false,"prompt_video":""}],"cenas":[{"n":1,"duracao_s":5,"visual":"","fala_ou_texto":"","prompt_video":""}],"prompts_imagem":[{"slide":1,"prompt":"","proporcao":"4:5"}]}
 "slides" é usado em Carrossel e Estatico; "cenas" em Reels e Stories. O que não se aplica vem como lista vazia.`;
@@ -58,3 +62,30 @@ Responda APENAS com um objeto JSON com os mesmos campos da versão atual (legend
 "alterou_legenda": true|false, "alterou_slides": [números], "alterou_imagens": [números], "resumo_mudancas": "frase curta dizendo o que mudou"`;
 
 export const idiomaDe = m => (m && m.idioma) || "Português (Brasil)";
+
+// Texto do briefing para o Claude (o mesmo do fluxo 03 do n8n).
+export function briefingTexto(b, formato) {
+  if (!b || typeof b !== 'object') return '';
+  const L = [];
+  const video = ['Reels', 'Stories'].includes(formato);
+  if (!video) {
+    const capa = { foto: 'capa (slide 1) com foto de fundo', video: 'capa (slide 1) em vídeo: usa_video true e usa_imagem true', texto: 'capa (slide 1) só com texto, sem imagem' }[b.capa];
+    if (capa && formato !== 'Estatico') L.push('- ' + capa);
+    const fundo = {
+      fotos: 'demais slides com foto de fundo (usa_imagem true, usa_video false)',
+      videos: 'demais slides em vídeo (usa_video true e usa_imagem true), menos o último se for só CTA',
+      misto: 'demais slides misturando fotos e vídeos: vídeo onde o movimento ajuda a contar a história, foto no resto',
+      texto: 'demais slides só com texto, sem imagem',
+    }[b.fundo];
+    if (fundo) L.push('- ' + (formato === 'Estatico' ? fundo.replace('demais slides', 'o post') : fundo));
+    if (b.slides && b.slides !== 'auto' && formato !== 'Estatico') L.push('- exatamente ' + Number(b.slides) + ' slides');
+  } else {
+    if (b.duracao) L.push('- duração total de até ' + Number(b.duracao) + ' segundos');
+    if (b.cenas && b.cenas !== 'auto') L.push('- exatamente ' + Number(b.cenas) + ' cenas');
+    if (b.textoNaTela === 'nao') L.push('- sem texto na tela: deixe "fala_ou_texto" vazio em todas as cenas');
+  }
+  const obj = { engajar: 'engajar (comentários, salvamentos, compartilhamentos)', educar: 'educar e tirar dúvidas', vender: 'converter: levar para compra ou cadastro', institucional: 'fortalecer a marca' }[b.objetivo];
+  if (obj) L.push('- objetivo: ' + obj);
+  if (b.observacoes) L.push('- observações da pessoa: ' + String(b.observacoes).slice(0, 1000));
+  return L.length ? '<briefing>\n' + L.join('\n') + '\n</briefing>' : '';
+}

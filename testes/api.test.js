@@ -135,11 +135,14 @@ test("criar post: Claude escreve, Magnific gera foto, post vai para revisão", a
   const { id } = await chamar({ acao: "agendarIdeia", id: i, data: new Date(Date.now() + 2 * 86400000).toISOString() }, ana);
   const original = globalThis.fetch;
   const pedidos = [];
+  let corpoClaude = null;
+  assert.equal((await chamar({ acao: "enviarArquivoMarca", campo: "MoodBoard", tipo: "image/jpeg", nome: "mood.jpg", base64: JPG }, ana)).status, 200);
   globalThis.fetch = async (url, op = {}) => {
     pedidos.push(String(url));
     const json = (o, s = 200) => new Response(JSON.stringify(o), { status: s, headers: { "content-type": "application/json" } });
     if (String(url).includes("anthropic.com")) {
       assert.equal(op.headers["x-api-key"], "sk-ant-teste-1234567890");
+      corpoClaude = JSON.parse(op.body);
       return json({ content: [{ type: "text", text: JSON.stringify({ legenda: "Legenda", hashtags: ["#a"], slides: [{ n: 1, titulo: "Capa", texto: "x", usa_imagem: true }, { n: 2, titulo: "Fim", texto: "" }], cenas: [], prompts_imagem: [{ slide: 1, prompt: "a photo", proporcao: "4:5" }] }) }], stop_reason: "end_turn" });
     }
     if (String(url).endsWith("/v1/ai/mystic") && op.method === "POST") return json({ data: { task_id: "t1", status: "CREATED" } });
@@ -148,7 +151,7 @@ test("criar post: Claude escreve, Magnific gera foto, post vai para revisão", a
     return original(url, op);
   };
   try {
-    assert.equal((await chamar({ acao: "criarPost", id }, bob)).status, 200);
+    assert.equal((await chamar({ acao: "criarPost", id, briefing: { capa: "video", fundo: "misto", slides: "7", objetivo: "educar", hack: "x" } }, bob)).status, 200);
     await puxar();
     for (let k = 0; k < 100; k++) {
       const st = (await db().query("select status from tarefas where tipo = 'criar' order by criado_em desc limit 1")).rows[0].status;
@@ -164,6 +167,14 @@ test("criar post: Claude escreve, Magnific gera foto, post vai para revisão", a
   assert.equal(p.Fotos.length, 1);
   assert.deepEqual(Object.keys(JSON.parse(p.ImagensSlides)), ["1"]);
   assert.ok(pedidos.some(u => u.includes("api.freepik.com/v1/ai/mystic")));
+  // Briefing e mood board chegam ao Claude; o mood board vai em base64, sem link.
+  const conteudo = corpoClaude.messages[0].content;
+  const textoFinal = conteudo[conteudo.length - 1].text;
+  assert.ok(textoFinal.includes("<briefing>"));
+  assert.ok(textoFinal.includes("capa (slide 1) em vídeo"));
+  assert.ok(textoFinal.includes("exatamente 7 slides"));
+  assert.equal(conteudo.find(b => b.type === "image").source.type, "base64");
+  assert.equal(JSON.parse(p.Briefing).hack, undefined);
 });
 
 test("importar do Airtable traz marca, fontes, ideias e calendário sem guardar o token", async () => {

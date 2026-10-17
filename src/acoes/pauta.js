@@ -232,7 +232,19 @@ export const acoesPauta = {
   async criarPost(ctx, b) {
     const p = await postDaOrg(ctx.org, b.id);
     if (!["Planejado", "Erro"].includes(p.status)) falha("Este post já foi criado.");
-    await db().query("update posts set status = 'EmCriacao', erro = null, atualizado_em = now() where id = $1", [p.id]);
+    // Respostas dadas no painel antes de criar. Só valores conhecidos passam.
+    const r = b.briefing || {};
+    const um = (v, lista) => (lista.includes(v) ? v : undefined);
+    const br = {
+      capa: um(r.capa, ["foto", "video", "texto"]), fundo: um(r.fundo, ["fotos", "videos", "misto", "texto"]),
+      slides: r.slides === "auto" ? "auto" : (Number(r.slides) >= 2 && Number(r.slides) <= 10 ? Number(r.slides) : undefined),
+      objetivo: um(r.objetivo, ["engajar", "educar", "vender", "institucional"]),
+      duracao: [15, 30, 45].includes(Number(r.duracao)) ? Number(r.duracao) : undefined,
+      cenas: r.cenas === "auto" ? "auto" : (Number(r.cenas) >= 2 && Number(r.cenas) <= 8 ? Number(r.cenas) : undefined),
+      textoNaTela: um(r.textoNaTela, ["sim", "nao"]), observacoes: texto(r.observacoes, 1000) || undefined,
+    };
+    Object.keys(br).forEach(k => br[k] === undefined && delete br[k]);
+    await db().query("update posts set status = 'EmCriacao', erro = null, briefing = $2, atualizado_em = now() where id = $1", [p.id, Object.keys(br).length ? JSON.stringify(br) : null]);
     await enfileirar(ctx.org, "criar", { post: p.id }, ctx.usuario.id);
     return {};
   },
