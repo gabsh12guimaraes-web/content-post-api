@@ -407,3 +407,117 @@ test("a chave de publicação da plataforma nunca é usada por clientes", async 
     await assert.rejects(() => chaveDe(r.organizacao.id, "zernio"), /não está cadastrada/);
   } finally { delete process.env.COBRANCA; delete process.env.PLATAFORMA_ZERNIO; delete process.env.PLATAFORMA_ANTHROPIC; }
 });
+
+test("redes conectadas: um profile do Zernio por organização e cada uma publica só nas próprias contas", async () => {
+  process.env.COBRANCA = "sim"; process.env.PLATAFORMA_ZERNIO = "sk_zernio_da_plataforma"; process.env.ZERNIO_INTERVALO_MS = "5";
+  const original = globalThis.fetch;
+  const pedidos = [], perfis = new Map(); let corpoPost = null, n = 0;
+  // Contas na conta Zernio da plataforma, em profiles diferentes. O simulador ignora o filtro de profile de propósito,
+  // para provar que a API confere o profile de cada conta antes de usar.
+  const contas = [];
+  const simulado = async (url, op = {}) => {
+    const u = new URL(String(url)), metodo = op.method || "GET";
+    if (u.host !== "zernio.com") return original(url, op);
+    pedidos.push({ metodo, caminho: u.pathname, busca: u.searchParams, chave: op.headers.authorization, corpo: op.body ? JSON.parse(op.body) : null });
+    if (u.pathname === "/api/v1/profiles" && metodo === "POST") {
+      const b = JSON.parse(op.body);
+      if (perfis.has(b.externalId)) return new Response(JSON.stringify({ error: "existe", code: "profile_external_id_conflict" }), { status: 409 });
+      const id = "perfil" + (++n); perfis.set(b.externalId, id);
+      return new Response(JSON.stringify({ profile: { _id: id, name: b.name, externalId: b.externalId } }), { status: 201 });
+    }
+    if (u.pathname === "/api/v1/profiles") { const e = u.searchParams.get("externalId"); return new Response(JSON.stringify({ profiles: perfis.has(e) ? [{ _id: perfis.get(e), externalId: e }] : [] })); }
+    if (u.pathname.startsWith("/api/v1/connect/")) return new Response(JSON.stringify({ authUrl: `https://zernio.com/oauth/${u.pathname.split("/").pop()}?p=${u.searchParams.get("profileId")}` }));
+    if (u.pathname === "/api/v1/accounts") return new Response(JSON.stringify({ accounts: contas }));
+    if (u.pathname.startsWith("/api/v1/accounts/") && metodo === "DELETE") return new Response(JSON.stringify({ message: "ok" }));
+    if (u.pathname === "/api/v1/posts") { corpoPost = JSON.parse(op.body); return new Response(JSON.stringify({ post: { _id: "zp", status: "published", platforms: [{ status: "published", platformPostUrl: "https://instagram.com/p/fabio" }] } }), { status: 201 }); }
+    return new Response("{}", { status: 404 });
+  };
+  globalThis.fetch = simulado;
+  const midias = [{ type: "image", url: "https://x/a.jpg" }];
+  try {
+    const f = await chamar({ acao: "cadastrar", nome: "Fábio", email: "fabio@exemplo.com", senha: "segredo123", organizacao: "Loja do Fábio" });
+    const g = await chamar({ acao: "cadastrar", nome: "Gil", email: "gil@exemplo.com", senha: "segredo123", organizacao: "Loja do Gil" });
+    const fabio = f.token, gil = g.token, orgF = f.organizacao.id, orgG = g.organizacao.id;
+    const { publicarZernio } = await import("../src/provedores/index.js");
+
+    // Antes de conectar: modo plataforma, nada conectado, e nada é pedido ao Zernio.
+    const vazio = await chamar({ acao: "contasRedes" }, fabio);
+    assert.equal(vazio.modo, "plataforma");
+    assert.deepEqual(vazio.contas, []);
+    assert.deepEqual(vazio.redes, ["Instagram", "Facebook", "TikTok", "X", "Threads"]);
+    assert.match((await publicarZernio(orgF, { rede: "instagram", midias, legenda: "oi", chave: "t0" })).erro, /Redes conectadas/);
+    assert.equal(pedidos.length, 0);
+
+    // Primeira conexão cria o profile da organização e devolve o link do Zernio com o profile dela.
+    const c = await chamar({ acao: "conectarRede", rede: "Instagram", voltar: "https://gabsh12guimaraes-web.github.io/app.html?x=1#integracoes" }, fabio);
+    assert.equal(c.status, 200);
+    assert.equal(c.url, "https://zernio.com/oauth/instagram?p=perfil1");
+    const criar = pedidos.find(p => p.caminho === "/api/v1/profiles");
+    assert.equal(criar.corpo.externalId, orgF);
+    assert.equal(criar.chave, "Bearer sk_zernio_da_plataforma");
+    const ligar = pedidos.find(p => p.caminho === "/api/v1/connect/instagram");
+    assert.equal(ligar.busca.get("profileId"), "perfil1");
+    assert.equal(ligar.busca.get("redirect_url"), "https://gabsh12guimaraes-web.github.io/app.html?x=1");
+    assert.equal((await db().query("select zernio_profile from organizacoes where id = $1", [orgF])).rows[0].zernio_profile, "perfil1");
+    // Segunda conexão reaproveita o profile; volta para site de fora não é repassada.
+    await chamar({ acao: "conectarRede", rede: "X", voltar: "https://site-malicioso.com/" }, fabio);
+    assert.equal(pedidos.filter(p => p.caminho === "/api/v1/profiles").length, 1);
+    assert.equal(pedidos.find(p => p.caminho === "/api/v1/connect/twitter").busca.get("redirect_url"), null);
+    assert.equal((await chamar({ acao: "conectarRede", rede: "Orkut" }, fabio)).status, 400);
+    // Se o profile já existe no Zernio (tentativa anterior que não gravou), acha pelo externalId em vez de criar outro.
+    await db().query("update organizacoes set zernio_profile = null where id = $1", [orgF]);
+    assert.equal((await chamar({ acao: "conectarRede", rede: "Instagram" }, fabio)).url, "https://zernio.com/oauth/instagram?p=perfil1");
+    assert.equal((await db().query("select zernio_profile from organizacoes where id = $1", [orgF])).rows[0].zernio_profile, "perfil1");
+
+    // Gil ganha outro profile.
+    assert.equal((await chamar({ acao: "conectarRede", rede: "X" }, gil)).url, "https://zernio.com/oauth/twitter?p=perfil2");
+    contas.push(
+      { _id: "ig-fabio", platform: "instagram", profileId: "perfil1", username: "lojadofabio", isActive: true },
+      { _id: "x-gil", platform: "twitter", profileId: { _id: "perfil2", name: "Loja do Gil" }, username: "lojadogil", isActive: true },
+      { _id: "ig-dono", platform: "instagram", profileId: "perfil-do-dono", username: "dono", isActive: true },
+    );
+    const lf = await chamar({ acao: "contasRedes" }, fabio);
+    assert.deepEqual(lf.contas.map(x => [x.id, x.rede, x.usuario]), [["ig-fabio", "Instagram", "lojadofabio"]]);
+    assert.equal(pedidos.at(-1).busca.get("profileId"), "perfil1");
+    assert.deepEqual((await chamar({ acao: "redesConectadas" }, gil)).redes, ["X"]);
+
+    // Gil não tem Instagram: não publica, nem na conta do Fábio nem na do dono da plataforma.
+    const rg = await publicarZernio(orgG, { rede: "instagram", midias, legenda: "oi", chave: "t1" });
+    assert.equal(rg.ok, false);
+    assert.match(rg.erro, /nenhuma conta de Instagram conectada/);
+    assert.equal(corpoPost, null);
+
+    // O post do Fábio, publicado pelo painel, sai só na conta dele.
+    const i = (await db().query("insert into ideias (org_id, titulo, formato, rede, score) values ($1, 'Post do Fábio', 'Estatico', 'Instagram', 7) returning id", [orgF])).rows[0].id;
+    const { id } = await chamar({ acao: "agendarIdeia", id: i, data: new Date(Date.now() + 86400000).toISOString() }, fabio);
+    await chamar({ acao: "salvarArtes", id, artes: [{ tipo: "image/jpeg", base64: JPG }] }, fabio);
+    await db().query("update posts set status = 'Agendado' where id = $1", [id]);
+    assert.equal((await chamar({ acao: "publicarAgora", id }, fabio)).status, 200);
+    for (let k = 0; k < 100; k++) { if ((await db().query("select status from posts where id = $1", [id])).rows[0].status !== "Publicando") break; await new Promise(r => setTimeout(r, 30)); }
+    assert.equal((await db().query("select status from posts where id = $1", [id])).rows[0].status, "Publicado");
+    assert.deepEqual(corpoPost.platforms, [{ platform: "instagram", accountId: "ig-fabio" }]);
+
+    // Desconectar: só contas da própria organização; editor não pode.
+    assert.equal((await chamar({ acao: "desconectarRede", conta: "x-gil" }, fabio)).status, 400);
+    assert.equal(pedidos.some(x => x.metodo === "DELETE"), false);
+    assert.equal((await chamar({ acao: "desconectarRede", conta: "ig-fabio" }, fabio)).status, 200);
+    assert.equal(pedidos.find(x => x.metodo === "DELETE").caminho, "/api/v1/accounts/ig-fabio");
+    const conv = await chamar({ acao: "convidar", email: "hel@exemplo.com", papel: "editor" }, gil);
+    const hel = (await chamar({ acao: "cadastrar", nome: "Hel", email: "hel@exemplo.com", senha: "segredo123", convite: conv.convite })).token;
+    assert.equal((await chamar({ acao: "conectarRede", rede: "Instagram" }, hel)).status, 403);
+    assert.equal((await chamar({ acao: "desconectarRede", conta: "x-gil" }, hel)).status, 403);
+
+    // Plano vencido: a chave da plataforma não é usada.
+    await db().query("update organizacoes set plano_ate = now() - interval '1 day' where id = $1", [orgG]);
+    assert.equal((await chamar({ acao: "contasRedes" }, gil)).modo, null);
+    assert.equal((await chamar({ acao: "conectarRede", rede: "X" }, gil)).status, 400);
+    await assert.rejects(() => publicarZernio(orgG, { rede: "twitter", midias, legenda: "oi", chave: "t2" }), /plano não está ativo/);
+
+    // Com chave própria, a organização usa a conta Zernio dela, sem profile da plataforma.
+    await chamar({ acao: "salvarIntegracao", provedor: "zernio", valor: "sk_zernio_do_fabio" }, fabio);
+    assert.equal((await chamar({ acao: "contasRedes" }, fabio)).modo, "propria");
+    assert.equal(pedidos.at(-1).chave, "Bearer sk_zernio_do_fabio");
+    assert.equal(pedidos.at(-1).busca.get("profileId"), null);
+    assert.equal((await chamar({ acao: "conectarRede", rede: "Instagram" }, fabio)).status, 400);
+  } finally { globalThis.fetch = original; delete process.env.COBRANCA; delete process.env.PLATAFORMA_ZERNIO; }
+});

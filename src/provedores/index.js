@@ -11,7 +11,7 @@ export async function chaveDe(org, provedor) {
   const r = (await db().query("select valor_cifrado from integracoes where org_id = $1 and provedor = $2", [org, provedor])).rows[0];
   if (!r) {
     // Planos pagos incluem a IA: sem chave própria, usa a da plataforma (PLATAFORMA_ANTHROPIC, _MAGNIFIC, _APIFY).
-    // O Zernio nunca: a chave da plataforma publicaria nas redes conectadas na conta da plataforma, não nas do cliente.
+    // O Zernio nunca por aqui: a chave da plataforma só é usada por zernioDe, sempre presa ao profile da organização.
     const daPlataforma = provedor === "zernio" ? null : process.env["PLATAFORMA_" + provedor.toUpperCase()];
     if (daPlataforma && cobrancaLigada()) { const s = await situacao(org); if (s.ativo) return daPlataforma; }
   }
@@ -89,22 +89,101 @@ export async function coletarApify(org, actor, input) {
 
 /* ---------- Zernio (publicação) ---------- */
 const ZERNIO = "https://zernio.com/api/v1";
-// Publica na hora: acha a conta da rede, cria o post com publishNow e acompanha até publicar ou falhar.
 // Nomes do painel para as plataformas do Zernio.
 const NOMES_REDE = { instagram: "Instagram", facebook: "Facebook", tiktok: "TikTok", twitter: "X", threads: "Threads", linkedin: "LinkedIn", youtube: "YouTube" };
-export async function redesConectadas(org) {
-  let chave; try { chave = await chaveDe(org, "zernio"); } catch (e) { return null; }
-  const r = await pedir(`${ZERNIO}/accounts`, { headers: { authorization: `Bearer ${chave}` } });
-  if (!r.ok) return null;
-  return [...new Set(((r.json && r.json.accounts) || []).filter(c => c.isActive !== false).map(c => NOMES_REDE[c.platform]).filter(Boolean))];
+// Redes que o cliente conecta pelo painel (nome do painel → plataforma do Zernio).
+export const REDES_CONECTAVEIS = { Instagram: "instagram", Facebook: "facebook", TikTok: "tiktok", X: "twitter", Threads: "threads" };
+
+// Com que conta do Zernio a organização publica:
+// - chave própria cadastrada em Integrações: a conta Zernio do cliente, com todas as contas dela;
+// - senão, a conta da plataforma (PLATAFORMA_ZERNIO), só para planos ativos e só com as contas do profile da organização.
+// A chave da plataforma nunca sai daqui sem o profile; sem profile, nada é listado nem publicado.
+export async function zernioDe(org) {
+  const propria = (await db().query("select 1 from integracoes where org_id = $1 and provedor = 'zernio'", [org])).rows.length > 0;
+  if (propria) return { modo: "propria", chave: await chaveDe(org, "zernio"), perfil: null };
+  const daPlataforma = process.env.PLATAFORMA_ZERNIO;
+  if (!daPlataforma || !cobrancaLigada()) throw new ErroIntegracao("A chave do Zernio não está cadastrada. Cadastre em Integrações.");
+  if (!(await situacao(org)).ativo) throw new ErroIntegracao("Seu plano não está ativo. Renove para publicar nas redes conectadas.");
+  const perfil = (await db().query("select zernio_profile from organizacoes where id = $1", [org])).rows[0]?.zernio_profile || null;
+  return { modo: "plataforma", chave: daPlataforma, perfil };
 }
+const cabecalho = z => ({ authorization: `Bearer ${z.chave}` });
+const motivoZernio = r => String((r.json && (r.json.error || r.json.message)) || r.txt || r.status).slice(0, 300);
+const perfilDaConta = c => String((c.profileId && c.profileId._id) || c.profileId || "");
+// Contas que a organização pode usar. No modo plataforma, só as do profile dela: filtradas no pedido e conferidas aqui de novo.
+async function contasZernio(z) {
+  if (z.modo === "plataforma" && !z.perfil) return { ok: true, status: 200, contas: [] };
+  const r = await pedir(`${ZERNIO}/accounts${z.perfil ? "?profileId=" + encodeURIComponent(z.perfil) : ""}`, { headers: cabecalho(z) });
+  if (!r.ok) return { ok: false, status: r.status, contas: [] };
+  const todas = (r.json && r.json.accounts) || [];
+  return { ok: true, status: r.status, contas: z.perfil ? todas.filter(c => perfilDaConta(c) === z.perfil) : todas };
+}
+export async function redesConectadas(org) {
+  let z; try { z = await zernioDe(org); } catch (e) { return null; }
+  const r = await contasZernio(z);
+  if (!r.ok) return null;
+  return [...new Set(r.contas.filter(c => c.isActive !== false).map(c => NOMES_REDE[c.platform]).filter(Boolean))];
+}
+// Lista da seção "Redes conectadas" do painel. modo null = a organização ainda não tem como publicar.
+export async function contasConectadas(org) {
+  let z; try { z = await zernioDe(org); } catch (e) { return { modo: null, contas: [], aviso: e.message }; }
+  const r = await contasZernio(z);
+  if (!r.ok) return { modo: z.modo, contas: [], aviso: z.modo === "propria" ? "O Zernio recusou a chave. Confira em Integrações." : "Não consegui falar com o Zernio agora." };
+  const contas = r.contas.filter(c => NOMES_REDE[c.platform]).map(c => ({
+    id: c._id, rede: NOMES_REDE[c.platform], usuario: c.username || "", nome: c.displayName || "",
+    ativa: c.isActive !== false, reconectar: !!c.needsReconnection,
+  }));
+  return { modo: z.modo, contas };
+}
+// Cria o profile da organização na conta da plataforma (externalId = id da organização) e guarda o id.
+async function criarPerfil(org, z) {
+  const nome = (await db().query("select nome from organizacoes where id = $1", [org])).rows[0].nome;
+  const r = await pedir(`${ZERNIO}/profiles`, {
+    method: "POST", headers: { ...cabecalho(z), "content-type": "application/json", "idempotency-key": "content-post-org-" + org },
+    body: JSON.stringify({ name: `${String(nome).slice(0, 60)} · ${org.slice(0, 8)}`, description: "Content Post", externalId: org }),
+  });
+  let id = r.json && r.json.profile && r.json.profile._id;
+  if (!id && (r.status === 409 || r.status === 422)) {
+    // Já existe (uma tentativa anterior criou): acha pelo externalId.
+    const l = await pedir(`${ZERNIO}/profiles?externalId=${encodeURIComponent(org)}`, { headers: cabecalho(z) });
+    id = (((l.json && l.json.profiles) || []).find(p => p.externalId === org) || {})._id;
+  }
+  if (!id) throw new ErroIntegracao("Não consegui preparar a conexão no Zernio: " + motivoZernio(r));
+  // Se duas pessoas conectarem ao mesmo tempo, vale o primeiro profile gravado.
+  await db().query("update organizacoes set zernio_profile = $2 where id = $1 and zernio_profile is null", [org, String(id)]);
+  return (await db().query("select zernio_profile from organizacoes where id = $1", [org])).rows[0].zernio_profile;
+}
+const SO_PELA_PROPRIA = "Esta organização publica pela própria conta do Zernio: conecte e desconecte as redes em zernio.com. Para fazer por aqui, remova a chave do Zernio em Integrações.";
+// Link para o cliente autorizar uma rede; a conta conectada entra no profile da organização.
+export async function linkConexao(org, nomeRede, voltar) {
+  const plataforma = REDES_CONECTAVEIS[nomeRede];
+  if (!plataforma) throw new ErroIntegracao("Rede desconhecida.");
+  const z = await zernioDe(org);
+  if (z.modo !== "plataforma") throw new ErroIntegracao(SO_PELA_PROPRIA);
+  const perfil = z.perfil || await criarPerfil(org, z);
+  const q = new URLSearchParams({ profileId: perfil });
+  if (voltar) q.set("redirect_url", voltar);
+  const r = await pedir(`${ZERNIO}/connect/${plataforma}?${q}`, { headers: cabecalho(z) });
+  const url = r.json && r.json.authUrl;
+  if (!r.ok || !/^https:\/\//.test(url || "")) throw new ErroIntegracao(`O Zernio não abriu a conexão com o ${nomeRede}: ${motivoZernio(r)}`);
+  return url;
+}
+export async function desconectarConta(org, id) {
+  const z = await zernioDe(org);
+  if (z.modo !== "plataforma") throw new ErroIntegracao(SO_PELA_PROPRIA);
+  const { contas } = await contasZernio(z);
+  if (!contas.some(c => c._id === id)) throw new ErroIntegracao("Esta conta não está conectada nesta organização.");
+  const r = await pedir(`${ZERNIO}/accounts/${encodeURIComponent(id)}`, { method: "DELETE", headers: cabecalho(z) });
+  if (!r.ok && r.status !== 404) throw new ErroIntegracao("O Zernio não desconectou a conta: " + motivoZernio(r));
+}
+// Publica na hora: acha a conta da rede, cria o post com publishNow e acompanha até publicar ou falhar.
 export async function publicarZernio(org, { rede, midias, legenda, opcoes, chave: idPedido }) {
-  const chave = await chaveDe(org, "zernio");
-  const h = { "content-type": "application/json", authorization: `Bearer ${chave}` };
-  const contas = await pedir(`${ZERNIO}/accounts`, { headers: h });
-  if (contas.status === 401 || contas.status === 403) return { ok: false, erro: "o Zernio recusou a chave. Confira em Integrações." };
-  const conta = ((contas.json && contas.json.accounts) || []).find(c => c.platform === rede && c.isActive !== false);
-  if (!conta) return { ok: false, erro: `nenhuma conta de ${rede || "rede"} conectada no Zernio` };
+  const z = await zernioDe(org);
+  const h = { "content-type": "application/json", ...cabecalho(z) };
+  const contas = await contasZernio(z);
+  if (contas.status === 401 || contas.status === 403) return { ok: false, erro: z.modo === "propria" ? "o Zernio recusou a chave. Confira em Integrações." : "o Zernio recusou o pedido da plataforma. Avise o suporte." };
+  const conta = contas.contas.find(c => c.platform === rede && c.isActive !== false);
+  if (!conta) return { ok: false, erro: z.modo === "plataforma" ? `nenhuma conta de ${NOMES_REDE[rede] || rede || "rede"} conectada. Conecte em Integrações › Redes conectadas` : `nenhuma conta de ${rede || "rede"} conectada no Zernio` };
   if (!midias.length) return { ok: false, erro: "o post não tem artes finais" };
   const destino = { platform: rede, accountId: conta._id };
   if (opcoes) destino.platformSpecificData = opcoes;

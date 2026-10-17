@@ -4,6 +4,7 @@ import { config } from "../config.js";
 import { hashSenha, conferirSenha, novoToken, hashToken, cifrar } from "../cripto.js";
 import { falha, exigirId, texto } from "../erros.js";
 import { testarProvedor } from "../provedores/testar.js";
+import { contasConectadas, linkConexao, desconectarConta, REDES_CONECTAVEIS } from "../provedores/index.js";
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PESO = { editor: 1, admin: 2, dono: 3 };
@@ -11,11 +12,20 @@ export const PROVEDORES = {
   anthropic: { nome: "Claude (Anthropic)", uso: "Escreve ideias, posts e ajustes", onde: "console.anthropic.com › API Keys" },
   magnific: { nome: "Magnific (Freepik)", uso: "Gera as fotos e os clipes de vídeo", onde: "magnific.com › Developers › API key" },
   apify: { nome: "Apify", uso: "Coleta posts das fontes (Instagram e TikTok)", onde: "console.apify.com › Settings › API & Integrations" },
-  zernio: { nome: "Zernio", uso: "Publica nas redes na data agendada (conecte o Instagram e as outras redes no Zernio)", onde: "zernio.com › Settings › API Keys" },
+  zernio: { nome: "Zernio (opcional)", uso: "Só se quiser publicar pela sua própria conta do Zernio. Sem esta chave, as redes conectadas acima são usadas", onde: "zernio.com › Settings › API Keys" },
 };
 const emailOk = e => { const v = texto(e, 200).toLowerCase(); if (!EMAIL.test(v)) falha("Digite um e-mail válido."); return v; };
 const senhaOk = s => { if (typeof s !== "string" || s.length < 8 || s.length > 200) falha("A senha precisa ter pelo menos 8 caracteres."); return s; };
 export const podeGerir = papel => PESO[papel] >= PESO.admin;
+// Para onde o Zernio devolve a pessoa depois de conectar: só páginas dos sites liberados (ORIGENS), sem o #.
+// O X limita o endereço de volta a 258 caracteres codificados; se passar, volta só para a página.
+function voltarPara(v) {
+  let u; try { u = new URL(String(v || "")); } catch (e) { return null; }
+  if (!config.origens.includes(u.origin)) return null;
+  u.hash = "";
+  const s = u.toString();
+  return encodeURIComponent(s).length <= 258 ? s : u.origin + u.pathname;
+}
 
 async function abrirSessao(usuario, org, lembrar) {
   const token = novoToken();
@@ -231,6 +241,24 @@ export const acoesOrg = {
   async removerIntegracao(ctx, b) {
     if (!podeGerir(ctx.papel)) falha("Só donos e administradores podem remover chaves.", 403);
     await db().query("delete from integracoes where org_id = $1 and provedor = $2", [ctx.org, String(b.provedor || "")]);
+    return {};
+  },
+
+  // Redes conectadas pelo painel: cada organização tem um profile próprio na conta Zernio da plataforma.
+  async contasRedes(ctx) {
+    return { ...(await contasConectadas(ctx.org)), redes: Object.keys(REDES_CONECTAVEIS), podeGerir: podeGerir(ctx.papel) };
+  },
+
+  async conectarRede(ctx, b) {
+    if (!podeGerir(ctx.papel)) falha("Só donos e administradores podem conectar redes.", 403);
+    if (!REDES_CONECTAVEIS[b.rede]) falha("Rede desconhecida.");
+    return { url: await linkConexao(ctx.org, b.rede, voltarPara(b.voltar)) };
+  },
+
+  async desconectarRede(ctx, b) {
+    if (!podeGerir(ctx.papel)) falha("Só donos e administradores podem desconectar redes.", 403);
+    const id = texto(b.conta, 100); if (!id) falha("Conta inválida.");
+    await desconectarConta(ctx.org, id);
     return {};
   },
 
