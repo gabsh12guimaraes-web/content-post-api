@@ -19,7 +19,7 @@ Os preços do Magnific são de fontes de terceiros (a Freepik cobra por crédito
 ## Taxas
 
 - Kiwify: 8,99% + R$ 2,49 por venda.
-- Afiliados: até 20% de comissão sem cair abaixo de 100% de lucro.
+- Afiliados: a comissão escolhida foi **50%**. Venda direta continua com mais de 100% de lucro; venda por afiliado fica com lucro menor (tabela abaixo).
 
 ## Planos
 
@@ -35,6 +35,7 @@ Lucro sobre o custo:
 |---|---|---|---|
 | Venda direta | ~210% | ~185% | ~157% |
 | Venda por afiliado (20%) | ~140% | ~122% | ~100% |
+| Venda por afiliado (50%, a comissão atual) | ~40% | ~31% | ~19% |
 
 Teste grátis: 7 dias, 3 posts e 2 buscas de ideias.
 
