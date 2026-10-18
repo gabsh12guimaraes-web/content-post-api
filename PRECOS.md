@@ -1,6 +1,8 @@
 # Como os preços dos planos foram calculados
 
-Meta: **100% de lucro** (receita líquida = 2 × custo), mesmo no pior caso: venda feita por afiliado (20% de comissão) no plano anual.
+Meta: **cerca de 40% de lucro** (receita líquida ≈ 1,4 × custo) na venda direta, mesmo no pior caso: o plano anual. O mensal e o semestral ficam um pouco acima para o anual ter desconto.
+
+Na venda por afiliado, o lucro é **dividido meio a meio**: o afiliado fica com metade e a Content Post com a outra.
 
 ## Custo por post (inclui a IA)
 
@@ -19,23 +21,36 @@ Os preços do Magnific são de fontes de terceiros (a Freepik cobra por crédito
 ## Taxas
 
 - Kiwify: 8,99% + R$ 2,49 por venda.
-- Afiliados: a comissão escolhida foi **50%**. Venda direta continua com mais de 100% de lucro; venda por afiliado fica com lucro menor (tabela abaixo).
+- Afiliados: **13% de comissão nos três planos** (configurar em cada produto da Kiwify, com comissão também nas renovações).
 
 ## Planos
 
 | Plano | Posts/mês | Buscas de ideias/mês | Custo/mês | Mensal | Semestral (por mês) | Anual (por mês) |
 |---|---|---|---|---|---|---|
-| Essencial | 12 | 8 | R$ 106 | R$ 369 | R$ 339 (R$ 2.034) | R$ 307 (R$ 3.684) |
-| Profissional | 30 | 20 | R$ 258 | R$ 877 | R$ 807 (R$ 4.842) | R$ 729 (R$ 8.748) |
-| Agência | 80 | 50 | R$ 681 | R$ 2.307 | R$ 2.117 (R$ 12.702) | R$ 1.919 (R$ 23.028) |
+| Essencial | 12 | 8 | R$ 106 | R$ 177 | R$ 169 (R$ 1.014) | R$ 164 (R$ 1.968) |
+| Profissional | 30 | 20 | R$ 258 | R$ 417 | R$ 407 (R$ 2.442) | R$ 399 (R$ 4.788) |
+| Agência | 80 | 50 | R$ 681 | R$ 1.097 | R$ 1.067 (R$ 6.402) | R$ 1.049 (R$ 12.588) |
 
 Lucro sobre o custo:
 
 | | Mensal | Semestral | Anual |
 |---|---|---|---|
-| Venda direta | ~210% | ~185% | ~157% |
-| Venda por afiliado (20%) | ~140% | ~122% | ~100% |
-| Venda por afiliado (50%, a comissão atual) | ~40% | ~31% | ~19% |
+| Venda direta | ~46-49% | ~43-44% | ~40% |
+| Venda por afiliado (13%) | ~25-27% | ~22-24% | ~20% |
+
+## Comissão de afiliado
+
+A comissão é escolhida por produto na Kiwify (um produto por plano, com os três ciclos), então vale o mesmo percentual para mensal, semestral e anual. Ela foi calculada para dar ao afiliado **metade do lucro no plano anual**, que tem a menor margem. Nos ciclos mensal e semestral o afiliado fica com um pouco menos da metade (44% a 48% do lucro), e nunca com mais.
+
+Conta: comissão = (receita líquida − custo) ÷ 2 ÷ preço. No anual dá 13,0% a 13,1% nos três planos; arredondado para baixo, **13%**.
+
+| Plano | Venda anual | Lucro da venda | Afiliado (13%) | Content Post | Parte do afiliado no lucro |
+|---|---|---|---|---|---|
+| Essencial | R$ 1.968 | R$ 512 | R$ 256 | R$ 256 | 50% |
+| Profissional | R$ 4.788 | R$ 1.253 | R$ 622 | R$ 631 | 50% |
+| Agência | R$ 12.588 | R$ 3.282 | R$ 1.636 | R$ 1.645 | 50% |
+
+A conta supõe que a Kiwify calcula a comissão sobre o preço cheio. Se ela calcular sobre o valor já sem a taxa, o afiliado recebe cerca de 9% a menos que o mostrado e a Content Post fica com um pouco mais. Se o custo por post mudar, refaça a conta: a comissão para dividir o lucro ao meio é sempre perto de metade da margem líquida do plano anual.
 
 Teste grátis: 7 dias, 3 posts e 2 buscas de ideias.
 

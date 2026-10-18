@@ -8,9 +8,9 @@ const env = process.env;
 
 export const PLANOS = {
   teste: { nome: "Teste grátis", posts: 3, ideias: 2, precos: null },
-  essencial: { nome: "Essencial", posts: 12, ideias: 8, precos: { mensal: 369, semestral: 339, anual: 307 } },
-  profissional: { nome: "Profissional", posts: 30, ideias: 20, precos: { mensal: 877, semestral: 807, anual: 729 } },
-  agencia: { nome: "Agência", posts: 80, ideias: 50, precos: { mensal: 2307, semestral: 2117, anual: 1919 } },
+  essencial: { nome: "Essencial", posts: 12, ideias: 8, precos: { mensal: 177, semestral: 169, anual: 164 } },
+  profissional: { nome: "Profissional", posts: 30, ideias: 20, precos: { mensal: 417, semestral: 407, anual: 399 } },
+  agencia: { nome: "Agência", posts: 80, ideias: 50, precos: { mensal: 1097, semestral: 1067, anual: 1049 } },
 };
 export const CICLOS = { mensal: 1, semestral: 6, anual: 12 };
 

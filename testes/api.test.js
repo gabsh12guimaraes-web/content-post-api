@@ -265,7 +265,7 @@ test("planos: limite do teste, aviso da Kiwify ativa o plano e assinatura falsa 
   const duda = r.token, org = r.organizacao.id;
   const cat = await chamar({ acao: "planos" });
   assert.equal(cat.planos.length, 3);
-  assert.equal(cat.planos.find(p => p.id === "profissional").ciclos.find(c => c.ciclo === "anual").total, 729 * 12);
+  assert.equal(cat.planos.find(p => p.id === "profissional").ciclos.find(c => c.ciclo === "anual").total, 399 * 12);
 
   process.env.COBRANCA = "sim";
   try {
