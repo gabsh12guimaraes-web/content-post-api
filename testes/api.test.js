@@ -651,3 +651,18 @@ test("banco guarda o que a IA gera, reaproveita vídeo do banco e descarta o exc
     assert.ok((await chamar({ acao: "listarBanco" }, ana)).imagens.some(x => x.id === vid.id), "enviados pela pessoa ficam");
   } finally { mod.LIMITE_BANCO_IA.imagem = antes; }
 });
+
+test("migração leva ao banco as fotos e clipes de posts criados antes, sem duplicar", async () => {
+  const { salvarArquivo } = await import("../src/arquivos.js");
+  const foto = await salvarArquivo(anaOrg, { tipo: "image/jpeg", nome: "antiga", dados: Buffer.from(JPG, "base64") });
+  const clipe = await salvarArquivo(anaOrg, { tipo: "video/mp4", nome: "antigo.mp4", dados: Buffer.from("00000018667479706d703432", "hex") });
+  const conteudo = { prompts_imagem: [{ slide: 1, prompt: "uma foto antiga", proporcao: "4:5" }], cenas: [{ n: 2, prompt_video: "zoom antigo" }] };
+  const post = (await db().query("insert into posts (org_id, titulo, formato, rede, data_publicacao, fotos, clipes, conteudo) values ($1, 'Post antigo', 'Carrossel', 'Instagram', now(), $2, $3, $4) returning id",
+    [anaOrg, JSON.stringify({ 1: foto }), JSON.stringify({ 2: clipe }), JSON.stringify(conteudo)])).rows[0].id;
+  const sql = fs.readFileSync(new URL("../migracoes/011_banco_ia_antigos.sql", import.meta.url), "utf8");
+  await db().exec(sql); await db().exec(sql);
+  const rows = (await db().query("select * from banco_imagens where post_id = $1 order by nome", [post])).rows;
+  assert.equal(rows.length, 2, "uma vez cada, mesmo rodando duas vezes");
+  assert.deepEqual(rows.map(r => [r.nome, r.descricao, r.origem]), [["Post antigo · 1", "uma foto antiga", "ia"], ["Post antigo · 2", "zoom antigo", "ia"]]);
+  assert.equal((await db().query("select count(*)::int as n from banco_imagens b where (select count(*) from banco_imagens c where c.arquivo_id = b.arquivo_id) > 1")).rows[0].n, 0, "nada duplicado no banco");
+});
