@@ -18,7 +18,7 @@ export const COLUNAS = [
   ["ideias", "Ideias geradas"], ["posts_publicados", "Posts publicados"], ["posts_agendados", "Posts na fila"],
   ["chamadas_claude", "Chamadas ao Claude"], ["tokens_entrada", "Tokens de entrada"], ["tokens_saida", "Tokens de saída"], ["tokens_cache", "Tokens em cache"],
   ["fotos_ia", "Fotos geradas"], ["fotos_com_pessoa", "Fotos com pessoa real"], ["segundos_video", "Segundos de vídeo gerados"],
-  ["custo_ia_usd", "Custo de IA estimado (US$)"], ["custo_ia_mes_usd", "Custo de IA no mês (US$)"], ["chave_propria", "Usa chave própria"],
+  ["custo_ia_usd", "Custo de IA estimado (US$)"], ["custo_historico_usd", "Parte do custo calculada por estimativa (US$)"], ["custo_ia_mes_usd", "Custo de IA no mês (US$)"], ["chave_propria", "Usa chave própria"],
   ["fotos_no_banco", "Fotos no banco"], ["pessoas_cadastradas", "Pessoas cadastradas"],
 ];
 
@@ -48,6 +48,8 @@ export async function linhasRelatorio() {
       coalesce(sum(quantidade) filter (where provedor = 'magnific' and tipo = 'clipe'), 0) as segundos,
       bool_or(chave_propria) as propria
     from consumo ${cond} group by org_id`;
+  const consumoEstimado = await porOrg(`select org_id, coalesce(sum(entrada), 0) as entrada, coalesce(sum(saida), 0) as saida, 0 as cache_leitura, 0 as cache_escrita,
+      0 as fotos, 0 as fotos_pessoa, 0 as segundos from consumo where estimado and provedor = 'anthropic' group by org_id`);
   const consumo = await porOrg(somaConsumo(""));
   const consumoMes = await porOrg(somaConsumo("where criado_em >= $1"), [inicioMes]);
   const posts = await porOrg(`select org_id, count(*) filter (where status = 'Publicado') as publicados, count(*) filter (where status in ('Aprovado', 'Agendado', 'Publicando')) as fila from posts group by org_id`);
@@ -78,7 +80,7 @@ export async function linhasRelatorio() {
       ideias: de(ideias, p.org).n, posts_publicados: po.publicados, posts_agendados: po.fila,
       chamadas_claude: c.chamadas, tokens_entrada: c.entrada, tokens_saida: c.saida, tokens_cache: Number(c.cache_leitura) + Number(c.cache_escrita),
       fotos_ia: c.fotos, fotos_com_pessoa: c.fotos_pessoa, segundos_video: c.segundos,
-      custo_ia_usd: dinheiro(custo(c)), custo_ia_mes_usd: dinheiro(custo(cm)), chave_propria: c.propria ? "sim" : "não",
+      custo_ia_usd: dinheiro(custo(c)), custo_historico_usd: dinheiro(custo(de(consumoEstimado, p.org))), custo_ia_mes_usd: dinheiro(custo(cm)), chave_propria: c.propria ? "sim" : "não",
       fotos_no_banco: de(banco, p.org).n, pessoas_cadastradas: de(rostos, p.org).n,
     };
   });
