@@ -207,14 +207,19 @@ export const acoesPauta = {
     const img = (await db().query("select b.arquivo_id, a.tipo from banco_imagens b join arquivos a on a.id = b.arquivo_id where b.id = $1 and b.org_id = $2", [exigirId(b.imagem), ctx.org])).rows[0];
     if (!img) falha("Foto não encontrada no banco.", 404);
     const video = /^video\//.test(img.tipo);
-    const fotos = { ...(p.fotos || {}) }, clipes = { ...(p.clipes || {}) }, mapa = video ? clipes : fotos, antiga = mapa[n];
-    mapa[n] = img.arquivo_id;
+    const fotos = { ...(p.fotos || {}) }, clipes = { ...(p.clipes || {}) }, mapa = video ? clipes : fotos, outro = video ? fotos : clipes;
+    // Cada slide tem uma mídia só: trocar por vídeo tira a foto (e vice-versa), senão a antiga continua valendo.
+    const antigas = [mapa[n], outro[n]].filter(x => x && x !== img.arquivo_id);
+    mapa[n] = img.arquivo_id; delete outro[n];
     const marcar = lista => (Array.isArray(lista) ? lista : []).map((s, i) => ((Number(s.n) || i + 1) === n ? { ...s, ...(video ? { usa_video: true } : { usa_imagem: true }) } : s));
     const conteudo = { ...(p.conteudo || {}) };
     for (const k of ["slides", "cenas"]) if (Array.isArray(conteudo[k])) conteudo[k] = marcar(conteudo[k]);
     await db().query("update posts set fotos = $2, clipes = $3, slides = $4, conteudo = $5, artes_prontas = false, atualizado_em = now() where id = $1",
       [p.id, JSON.stringify(fotos), JSON.stringify(clipes), JSON.stringify(marcar(p.slides)), JSON.stringify(conteudo)]);
-    if (antiga && antiga !== img.arquivo_id) await apagarArquivos(ctx.org, [antiga]);
+    // Só apaga o que nenhuma outra tela do post usa mais.
+    const emUso = new Set([...Object.values(fotos), ...Object.values(clipes), ...(p.artes || [])]);
+    const soltas = antigas.filter(x => !emUso.has(x));
+    if (soltas.length) await apagarArquivos(ctx.org, soltas);
     return {};
   },
 

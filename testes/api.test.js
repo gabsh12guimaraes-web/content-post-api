@@ -938,3 +938,30 @@ test("story em sequência: a IA faz várias telas 9:16 e cada imagem sai como um
   assert.ok(stories.every(s => s.mediaItems.length === 1 && s.platforms[0].platformSpecificData.contentType === "story"));
   assert.deepEqual(Object.keys(fim.links), ["Instagram"], "sem as anotações parciais no fim");
 });
+
+test("trocar a foto de um story por vídeo do banco tira a foto antiga (e vice-versa)", async () => {
+  const MP4 = Buffer.from("000000186674797069736f6d0000020069736f6d69736f32", "hex").toString("base64");
+  const vid = await chamar({ acao: "enviarImagemBanco", tipo: "video/mp4", nome: "balcao.mp4", base64: MP4, titulo: "Balcão" }, ana);
+  const arqV = (await chamar({ acao: "listarBanco" }, ana)).imagens.find(x => x.id === vid.id).arquivo.id;
+  const { salvarArquivo } = await import("../src/arquivos.js");
+  const salvar = nome => salvarArquivo(anaOrg, { tipo: "image/png", nome, dados: Buffer.from("89504e470d0a1a0a", "hex") });
+  const antiga = await salvar("ia.png"), arqF = await salvar("copo.png");
+  const img = (await db().query("insert into banco_imagens (org_id, arquivo_id, nome, origem) values ($1, $2, 'Copo', 'envio') returning id", [anaOrg, arqF])).rows[0];
+  const { rows: [p] } = await db().query(`insert into posts (org_id, titulo, data_publicacao, rede, formato, status, slides, fotos, briefing)
+    values ($1, 'Story seq', now() + interval '5 days', 'Instagram', 'Stories', 'EmRevisao', $2, $3, '{"story":"sequencia"}') returning id`,
+    [anaOrg, JSON.stringify([{ n: 1, titulo: "A" }, { n: 2, titulo: "B" }]), JSON.stringify({ 1: antiga, 2: antiga })]);
+  assert.equal((await chamar({ acao: "trocarFotoSlide", id: p.id, slide: 1, imagem: vid.id }, ana)).status, 200);
+  let post = (await db().query("select fotos, clipes from posts where id = $1", [p.id])).rows[0];
+  assert.equal(post.clipes["1"], arqV);
+  assert.equal(post.fotos["1"], undefined, "a foto antiga sai da tela 1");
+  assert.equal(post.fotos["2"], antiga, "a tela 2 continua igual");
+  const res = (await chamar({ acao: "pauta" }, ana)).posts.find(x => x.id === p.id);
+  assert.deepEqual(Object.keys(JSON.parse(res.ImagensSlides)), ["2"]);
+  assert.deepEqual(Object.keys(JSON.parse(res.ClipesSlides)), ["1"]);
+  assert.equal(res.Fotos.length, 1, "a foto que a tela 2 ainda usa não é apagada");
+  assert.equal((await chamar({ acao: "trocarFotoSlide", id: p.id, slide: 1, imagem: img.id }, ana)).status, 200);
+  post = (await db().query("select fotos, clipes from posts where id = $1", [p.id])).rows[0];
+  assert.equal(post.fotos["1"], arqF);
+  assert.deepEqual(post.clipes, {});
+  assert.equal((await db().query("select count(*)::int as n from arquivos where id = $1", [arqV])).rows[0].n, 1, "o vídeo continua no banco");
+});

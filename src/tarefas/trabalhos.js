@@ -388,8 +388,9 @@ export function conteudoPara(nome, p, midias) {
   switch (nome) {
     case "Instagram": return { midias: story ? midias.slice(0, 10) : midias, legenda: story ? "" : legenda, opcoes: story ? { contentType: "story" } : null };
     case "Facebook": {
-      const m = imagens.length && videos.length ? imagens : midias; // o Facebook não mistura fotos e vídeo
-      if (story) return { midias: m.slice(0, 10), legenda: "", opcoes: { contentType: "story" } };
+      // Story: cada mídia sai como um story separado, então fotos e vídeos podem se misturar.
+      if (story) return { midias: midias.slice(0, 10), legenda: "", opcoes: { contentType: "story" } };
+      const m = imagens.length && videos.length ? imagens : midias; // o Facebook não mistura fotos e vídeo no feed
       if (p.formato === "Reels" && videos.length === 1 && !imagens.length) return { midias: videos, legenda, opcoes: { contentType: "reel", title: cortar(p.titulo, 100) } };
       return { midias: m.slice(0, 10), legenda, opcoes: null };
     }
