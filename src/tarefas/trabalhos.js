@@ -78,7 +78,7 @@ registrar("ideias", async (org, pedido = {}) => {
     "<descartes_recentes>", recentes.filter(r => r.status === "Descartada").slice(0, 20).map(r => "- " + r.titulo + (r.motivo_descarte ? " (motivo: " + r.motivo_descarte + ")" : "")).join("\n"), "</descartes_recentes>", "",
     "Gere " + quantidade + " ideias." + (formatos.length ? " Use apenas estes formatos: " + formatos.join(", ") + "." : " Misture os formatos.") + (tema ? " Todas sobre o tema em <tema_pedido>." : "") +
     " Em \"referencias\", use os códigos \"ref\" (c1, c2…) das referências que inspiraram cada ideia."].join("\n");
-  const dados = await claude(org, { system: SISTEMA_IDEIAS, content: user, effort: "medium" });
+  const dados = await claude(org, { system: SISTEMA_IDEIAS, content: user, effort: "medium", tipo: "ideias" });
   const norm = t => String(t || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim();
   const curto = t => norm(t).split(":")[0].trim();
   const pilares = m.pilares || [], redes = m.redes || [];
@@ -105,7 +105,7 @@ registrar("descreverImagem", async (org, { imagem }) => {
   const c = await claude(org, {
     system: 'Você descreve fotos do banco de imagens de uma marca para uma IA escolher a foto certa para cada post. Responda APENAS com JSON: {"nome":"até 5 palavras","descricao":"uma frase objetiva com o que aparece: produto, cor, material, modelo, cenário","tags":["até 6 palavras-chave curtas"]}. Em português do Brasil. Não invente marca, preço ou tamanho.',
     content: [{ type: "image", source: { type: "base64", media_type: arq.tipo, data: arq.dados.toString("base64") } }, { type: "text", text: "Descreva esta foto." + (r.nome ? " Nome dado pela pessoa: " + r.nome : "") }],
-    effort: "low", max_tokens: 800,
+    effort: "low", max_tokens: 800, tipo: "descrever_foto",
   });
   await db().query("update banco_imagens set nome = case when nome = '' then $3 else nome end, descricao = case when descricao = '' then $4 else descricao end, tags = case when cardinality(tags) = 0 then $5 else tags end where id = $1 and org_id = $2",
     [imagem, org, String(c.nome || "").slice(0, 80), String(c.descricao || "").slice(0, 400), (Array.isArray(c.tags) ? c.tags : []).map(t => String(t).slice(0, 30)).slice(0, 8)]);
@@ -245,7 +245,7 @@ export async function escolherDoBanco(org, post, briefing) {
   const slides = ehVideo(post.formato, { ...post, briefing }) ? Number(briefing.cenas) || 6 : post.formato === "Estatico" || ehStoryImagem({ ...post, briefing }) ? 2 : Number(briefing.slides) || 8;
   const user = [blocoMarca(m), "", "<post>", "titulo: " + post.titulo, "formato: " + (post.formato || ""), "pilar: " + (post.pilar || ""), "</post>", "",
     "<ideia>" + ((ideia && ideia.resumo) || post.titulo) + "</ideia>", "", briefingTexto(briefing, post.formato), "", "<banco_de_imagens>", ...linhas, "</banco_de_imagens>"].join("\n");
-  const c = await claude(org, { system: SISTEMA_ESCOLHA_BANCO.replace("{{maximo}}", String(Math.min(20, slides))), content: user, effort: "low", max_tokens: 2000 });
+  const c = await claude(org, { system: SISTEMA_ESCOLHA_BANCO.replace("{{maximo}}", String(Math.min(20, slides))), content: user, effort: "low", max_tokens: 2000, tipo: "escolher_banco" });
   const escolhidas = [...new Set((Array.isArray(c.escolhidas) ? c.escolhidas : []).map(x => ids[String(x).trim()]).filter(Boolean))].slice(0, 20);
   return { ids: escolhidas, motivo: String(c.motivo || "").slice(0, 300) };
 }
@@ -273,7 +273,7 @@ registrar("criar", Object.assign(async (org, { post: id }) => {
   const pedidoUsuario = banco.texto ? user + "\n\n" + banco.texto : user;
   const mood = await moodBoard(org, m);
   const content = mood.length ? [{ type: "text", text: "Mood board da marca (referência de estilo):" }, ...mood, { type: "text", text: pedidoUsuario }] : pedidoUsuario;
-  const c = await claude(org, { system: SISTEMA_POST, content, effort: "high" });
+  const c = await claude(org, { system: SISTEMA_POST, content, effort: "high", tipo: "post" });
   const video = ehVideo(post.formato, post);
   await db().query("update posts set legenda = $2, hashtags = $3, slides = $4, conteudo = $5, atualizado_em = now() where id = $1",
     [post.id, c.legenda || "", (c.hashtags || []).join(" "), JSON.stringify(video ? c.cenas || [] : c.slides || []), JSON.stringify(c)]);
@@ -301,7 +301,7 @@ registrar("ajustar", Object.assign(async (org, { post: id, comentario, slide = 0
   for (const k of ["alterou_legenda", "alterou_slides", "alterou_imagens", "resumo_mudancas"]) delete atual[k];
   const user = [blocoMarca(m), "", `<versao_atual numero="${post.versao}">`, JSON.stringify(atual, null, 1), "</versao_atual>", "",
     "<historico>", post.historico_ajustes || "", "</historico>", "", "<comentario>", comentario, "</comentario>"].join("\n");
-  const c = await claude(org, { system: SISTEMA_AJUSTE, content: user, effort: "medium" });
+  const c = await claude(org, { system: SISTEMA_AJUSTE, content: user, effort: "medium", tipo: "ajuste" });
   const video = ehVideo(post.formato, post);
   let regerar = (video && !(c.alterou_imagens || []).length ? c.alterou_slides : c.alterou_imagens || []).map(Number).filter(Boolean);
   if (novaImagem && !slide) regerar = [...new Set(regerar.concat((c.slides || c.cenas || []).filter(s => s.usa_imagem || s.usa_video || video).map((s, i) => Number(s.n) || i + 1)))];

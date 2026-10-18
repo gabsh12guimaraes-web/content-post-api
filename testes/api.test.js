@@ -770,3 +770,26 @@ test("lê o JSON do Claude com texto em volta ou dividido em vários objetos", a
   assert.equal(extrairJson("sem json aqui"), null);
   assert.equal(extrairJson('{"cortado": ['), null);
 });
+
+test("relatório da planilha: protegido por chave, com uma linha por pessoa e o consumo de IA", async () => {
+  const fora = await app.inject({ method: "GET", url: "/relatorio.csv?chave=x" });
+  assert.equal(fora.statusCode, 404, "sem RELATORIO_CHAVE a rota não existe");
+  process.env.RELATORIO_CHAVE = "c".repeat(40);
+  try {
+    assert.equal((await app.inject({ method: "GET", url: "/relatorio.csv?chave=errada" })).statusCode, 401);
+    await db().query("insert into consumo (org_id, provedor, tipo, entrada, saida, quantidade) values ($1, 'anthropic', 'post', 1000000, 100000, 1), ($1, 'magnific', 'clipe', 0, 0, 10)", [anaOrg]);
+    await db().query("insert into usuarios (email, nome, senha_hash, salt) values ('=cmd@exemplo.com', '=HYPERLINK(\"x\")', 'h', 's')");
+    const r = await app.inject({ method: "GET", url: "/relatorio.csv?chave=" + "c".repeat(40) });
+    assert.equal(r.statusCode, 200);
+    assert.match(r.headers["content-type"], /text\/csv/);
+    const linhas = r.body.trim().split("\n");
+    assert.match(linhas[0], /^Nome,E-mail,Cadastro/);
+    const anaLinha = linhas.find(l => l.includes("ana@exemplo.com"));
+    assert.ok(anaLinha, "a Ana aparece");
+    assert.match(anaLinha, /Easypeasy/);
+    assert.match(anaLinha, /,1000000,100000,/, "tokens de entrada e saída");
+    assert.match(anaLinha, /,7\.28,/, "custo: 4 + 2 de tokens, 1 de vídeo e 0,28 das 4 fotos dos outros testes");
+    assert.ok(linhas.some(l => l.startsWith(`"'=HYPERLINK(""x"")"`)), "texto que parece fórmula vira texto");
+    assert.ok(linhas.some(l => l.includes("sem organização")));
+  } finally { delete process.env.RELATORIO_CHAVE; }
+});

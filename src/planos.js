@@ -24,7 +24,7 @@ export const codigoCupom = (id, c) => (id + c).toUpperCase();
 // Cobrança ligada só quando COBRANCA=sim (até lá ninguém é bloqueado por limite).
 export const cobrancaLigada = () => env.COBRANCA === "sim";
 const lerJson = nome => { try { return JSON.parse(env[nome] || "{}"); } catch (e) { return {}; } };
-const isentos = () => (env.EMAILS_ISENTOS || "").split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
+export const isentos = () => (env.EMAILS_ISENTOS || "").split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
 
 // Links de checkout da Kiwify: KIWIFY_CHECKOUT = {"essencial:mensal": "https://pay.kiwify.com.br/...", ...}. O cupom entra no link (?coupon=).
 const comCupom = (u, codigo) => { if (!u) return null; try { const x = new URL(u); if (codigo) x.searchParams.set("coupon", codigo); return x.toString(); } catch (e) { return null; } };

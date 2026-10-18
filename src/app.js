@@ -9,6 +9,7 @@ import { lerArquivo } from "./arquivos.js";
 import { acoesConta, acoesOrg } from "./acoes/conta.js";
 import { acoesPauta } from "./acoes/pauta.js";
 import { ErroIntegracao } from "./provedores/index.js";
+import { relatorioCsv, chaveRelatorioOk } from "./relatorio.js";
 import { catalogo, situacao, assinaturaKiwifyOk, avisoKiwify } from "./planos.js";
 
 const PUBLICAS = new Set(["cadastrar", "entrar", "verConvite", "planos"]);
@@ -59,6 +60,14 @@ export async function criarApp() {
   });
 
   app.get("/saude", async () => ({ ok: true }));
+
+  // Relatório de controle para a planilha do Google (IMPORTDATA). Só existe com RELATORIO_CHAVE configurada.
+  app.get("/relatorio.csv", async (req, rep) => {
+    if (!process.env.RELATORIO_CHAVE) return rep.code(404).send("não encontrado");
+    try { limitar(req.ip, "relatorio"); } catch (e) { return rep.code(429).send("muitas tentativas"); }
+    if (!chaveRelatorioOk(req.query.chave)) return rep.code(401).send("chave inválida");
+    return rep.header("content-type", "text/csv; charset=utf-8").header("cache-control", "no-store").send(await relatorioCsv());
+  });
 
   // Avisos da Kiwify (compra aprovada, renovação, cancelamento, estorno).
   app.post("/kiwify", async (req, rep) => {

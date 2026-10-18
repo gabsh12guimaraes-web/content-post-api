@@ -19,6 +19,15 @@ export async function chaveDe(org, provedor) {
   return decifrar(r.valor_cifrado);
 }
 
+// Guarda o que cada chamada de IA consumiu (relatório de controle). Uma falha aqui nunca derruba a tarefa.
+async function registrarConsumo(org, provedor, d) {
+  try {
+    const propria = (await db().query("select 1 from integracoes where org_id = $1 and provedor = $2", [org, provedor])).rows.length > 0;
+    await db().query("insert into consumo (org_id, provedor, tipo, entrada, saida, cache_leitura, cache_escrita, quantidade, chave_propria) values ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+      [org, provedor, d.tipo || "", d.entrada || 0, d.saida || 0, d.cacheLeitura || 0, d.cacheEscrita || 0, d.quantidade || 0, propria]);
+  } catch (e) { console.error("[consumo]", e.message); }
+}
+
 async function pedir(url, opcoes, tempoMs = 120000) {
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), tempoMs);
@@ -32,7 +41,7 @@ async function pedir(url, opcoes, tempoMs = 120000) {
 const esperar = ms => new Promise(r => setTimeout(r, ms));
 
 /* ---------- Claude ---------- */
-export async function claude(org, { system, content, effort = "medium", max_tokens = 16000 }) {
+export async function claude(org, { system, content, effort = "medium", max_tokens = 16000, tipo = "" }) {
   const chave = await chaveDe(org, "anthropic");
   const r = await pedir("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -40,6 +49,8 @@ export async function claude(org, { system, content, effort = "medium", max_toke
     body: JSON.stringify({ model: config.modeloClaude, max_tokens, output_config: { effort }, fallbacks: "default", system, messages: [{ role: "user", content }] }),
   }, 600000);
   const j = r.json || {};
+  const u = j.usage || {};
+  if (r.ok && j.type !== "error") await registrarConsumo(org, "anthropic", { tipo, entrada: u.input_tokens, saida: u.output_tokens, cacheLeitura: u.cache_read_input_tokens, cacheEscrita: u.cache_creation_input_tokens, quantidade: 1 });
   if (!r.ok || j.type === "error") throw new ErroIntegracao("falha na API do Claude: " + String((j.error && j.error.message) || r.txt).slice(0, 300));
   if (j.stop_reason === "refusal") throw new ErroIntegracao("o Claude recusou o pedido");
   if (j.stop_reason === "max_tokens") throw new ErroIntegracao("a resposta ficou longa demais e foi cortada");
@@ -96,23 +107,28 @@ async function tarefaMagnific(org, criar, ver, corpo, { intervalo = 15000, limit
 }
 const PROPORCAO = { "4:5": "social_post_4_5", "1:1": "square_1_1", "9:16": "social_story_9_16", "16:9": "widescreen_16_9" };
 export const gerarFoto = (org, prompt, proporcao) =>
-  tarefaMagnific(org, "/v1/ai/mystic", "/v1/ai/mystic", { prompt, aspect_ratio: PROPORCAO[proporcao] || "social_post_4_5" }, { intervalo: 10000, limiteMs: 15 * 60000 });
+  tarefaMagnific(org, "/v1/ai/mystic", "/v1/ai/mystic", { prompt, aspect_ratio: PROPORCAO[proporcao] || "social_post_4_5" }, { intervalo: 10000, limiteMs: 15 * 60000 })
+    .then(async url => { await registrarConsumo(org, "magnific", { tipo: "foto", quantidade: 1 }); return url; });
 // Foto com uma pessoa real: o Seedream 4.5 Edit recebe a foto de rosto como referência e põe a pessoa na cena do prompt.
 const PROPORCAO_SEEDREAM = { "4:5": "traditional_3_4", "1:1": "square_1_1", "9:16": "social_story_9_16", "16:9": "widescreen_16_9" };
 export async function gerarFotoComPessoa(org, prompt, proporcao, rosto) {
   const corpo = { prompt, reference_images: [rosto], aspect_ratio: PROPORCAO_SEEDREAM[proporcao] || "traditional_3_4", enable_safety_checker: true };
   const ir = c => tarefaMagnific(org, "/v1/ai/text-to-image/seedream-v4-5-edit", "/v1/ai/text-to-image/seedream-v4-5-edit", c, { intervalo: 10000, limiteMs: 15 * 60000 });
-  try { return await ir(corpo); }
+  try { const url = await ir(corpo); await registrarConsumo(org, "magnific", { tipo: "foto_pessoa", quantidade: 1 }); return url; }
   catch (e) {
     // Se o Magnific não aceitar a proporção, gera na proporção padrão (a arte recorta depois).
-    if (e instanceof ErroIntegracao && /aspect/i.test(e.message)) { delete corpo.aspect_ratio; return ir(corpo); }
+    if (e instanceof ErroIntegracao && /aspect/i.test(e.message)) { delete corpo.aspect_ratio; const url = await ir(corpo); await registrarConsumo(org, "magnific", { tipo: "foto_pessoa", quantidade: 1 }); return url; }
     throw e;
   }
 }
-export const gerarClipe = (org, { prompt, duracao, proporcao, imagem }) =>
-  tarefaMagnific(org, "/v1/ai/video/kling-v3-std", "/v1/ai/video/kling-v3",
-    Object.assign({ prompt, duration: String(Math.min(10, Math.max(3, Math.round(Number(duracao) || 5)))), aspect_ratio: proporcao, generate_audio: false, cfg_scale: 0.5 }, imagem ? { start_image_url: imagem } : {}),
+export async function gerarClipe(org, { prompt, duracao, proporcao, imagem }) {
+  const segundos = Math.min(10, Math.max(3, Math.round(Number(duracao) || 5)));
+  const url = await tarefaMagnific(org, "/v1/ai/video/kling-v3-std", "/v1/ai/video/kling-v3",
+    Object.assign({ prompt, duration: String(segundos), aspect_ratio: proporcao, generate_audio: false, cfg_scale: 0.5 }, imagem ? { start_image_url: imagem } : {}),
     { intervalo: 20000 });
+  await registrarConsumo(org, "magnific", { tipo: "clipe", quantidade: segundos }); // quantidade = segundos de vídeo
+  return url;
+}
 
 /* ---------- Apify (coleta das fontes) ---------- */
 export async function coletarApify(org, actor, input) {
