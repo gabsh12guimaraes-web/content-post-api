@@ -6,7 +6,7 @@ import { marcaParaPainel, fonteParaPainel, ideiaParaPainel, postsParaPainel } fr
 import { enfileirar } from "../tarefas/fila.js";
 import { cifrar } from "../cripto.js";
 import { podeGerir } from "./conta.js";
-import { publicarJa, REDES_PUBLICACAO } from "../tarefas/trabalhos.js";
+import { publicarJa, REDES_PUBLICACAO, escolherDoBanco } from "../tarefas/trabalhos.js";
 import { redesConectadas } from "../provedores/index.js";
 import { usar } from "../planos.js";
 
@@ -23,6 +23,24 @@ async function postDaOrg(org, id) {
   const p = (await db().query("select * from posts where id = $1 and org_id = $2", [exigirId(id), org])).rows[0];
   if (!p) falha("Post não encontrado.", 404);
   return p;
+}
+// Respostas dadas no painel antes de criar. Só valores conhecidos passam.
+function limparBriefing(r) {
+  r = r && typeof r === "object" ? r : {};
+  const um = (v, lista) => (lista.includes(v) ? v : undefined);
+  const br = {
+    capa: um(r.capa, ["foto", "video", "texto"]), fundo: um(r.fundo, ["fotos", "videos", "misto", "texto"]),
+    slides: r.slides === "auto" ? "auto" : (Number(r.slides) >= 2 && Number(r.slides) <= 10 ? Number(r.slides) : undefined),
+    objetivo: um(r.objetivo, ["engajar", "educar", "vender", "institucional"]),
+    duracao: [15, 30, 45].includes(Number(r.duracao)) ? Number(r.duracao) : undefined,
+    cenas: r.cenas === "auto" ? "auto" : (Number(r.cenas) >= 2 && Number(r.cenas) <= 8 ? Number(r.cenas) : undefined),
+    textoNaTela: um(r.textoNaTela, ["sim", "nao"]), observacoes: texto(r.observacoes, 1000) || undefined,
+    story: um(r.story, ["imagem", "continuo", "varios"]),
+    imagens: um(r.imagens, ["ia", "banco", "misto"]),
+    banco: Array.isArray(r.banco) ? r.banco.filter(x => UUID.test(String(x))).slice(0, 20) : undefined,
+  };
+  Object.keys(br).forEach(k => br[k] === undefined && delete br[k]);
+  return br;
 }
 const anexosIds = lista => (Array.isArray(lista) ? lista : []).map(a => a && a.id).filter(id => UUID.test(String(id || "")));
 
@@ -344,24 +362,18 @@ export const acoesPauta = {
     return {};
   },
 
+  // Botão "IA escolhe" no briefing: a IA marca no banco as fotos e vídeos que têm a ver com o post. Não conta como post do plano.
+  async escolherBanco(ctx, b) {
+    const p = await postDaOrg(ctx.org, b.id);
+    const total = (await db().query("select count(*)::int as n from banco_imagens where org_id = $1", [ctx.org])).rows[0].n;
+    if (!total) falha("O banco de imagens está vazio. Envie fotos em Banco de imagens e vídeos.");
+    return await escolherDoBanco(ctx.org, p, limparBriefing(b.briefing));
+  },
+
   async criarPost(ctx, b) {
     const p = await postDaOrg(ctx.org, b.id);
     if (!["Planejado", "Erro"].includes(p.status)) falha("Este post já foi criado.");
-    // Respostas dadas no painel antes de criar. Só valores conhecidos passam.
-    const r = b.briefing || {};
-    const um = (v, lista) => (lista.includes(v) ? v : undefined);
-    const br = {
-      capa: um(r.capa, ["foto", "video", "texto"]), fundo: um(r.fundo, ["fotos", "videos", "misto", "texto"]),
-      slides: r.slides === "auto" ? "auto" : (Number(r.slides) >= 2 && Number(r.slides) <= 10 ? Number(r.slides) : undefined),
-      objetivo: um(r.objetivo, ["engajar", "educar", "vender", "institucional"]),
-      duracao: [15, 30, 45].includes(Number(r.duracao)) ? Number(r.duracao) : undefined,
-      cenas: r.cenas === "auto" ? "auto" : (Number(r.cenas) >= 2 && Number(r.cenas) <= 8 ? Number(r.cenas) : undefined),
-      textoNaTela: um(r.textoNaTela, ["sim", "nao"]), observacoes: texto(r.observacoes, 1000) || undefined,
-      story: um(r.story, ["imagem", "continuo", "varios"]),
-      imagens: um(r.imagens, ["ia", "banco", "misto"]),
-      banco: Array.isArray(r.banco) ? r.banco.filter(x => UUID.test(String(x))).slice(0, 20) : undefined,
-    };
-    Object.keys(br).forEach(k => br[k] === undefined && delete br[k]);
+    const br = limparBriefing(b.briefing);
     await usar(ctx.org, "post");
     await db().query("update posts set status = 'EmCriacao', erro = null, briefing = $2, atualizado_em = now() where id = $1", [p.id, Object.keys(br).length ? JSON.stringify(br) : null]);
     await enfileirar(ctx.org, "criar", { post: p.id }, ctx.usuario.id);
