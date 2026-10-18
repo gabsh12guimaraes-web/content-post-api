@@ -884,3 +884,14 @@ test("modelo do perfil: a IA lê os posts enviados (ou do Instagram) e devolve u
   assert.equal((await chamar({ acao: "removerModelo", id }, ana)).status, 200);
   assert.equal((await chamar({ acao: "listarModelos" }, ana)).modeloPadrao, null, "remover tira o padrão");
 });
+
+test("onboarding: organização nova começa pendente; concluir marca como feito e mantém o checklist", async () => {
+  const r = await chamar({ acao: "cadastrar", nome: "Gil", email: "gil-onb@exemplo.org", senha: "segredo123", organizacao: "Café do Gil" });
+  assert.equal(r.organizacao.onboarding, true);
+  assert.equal((await chamar({ acao: "concluirOnboarding" }, r.token)).status, 200);
+  const eu = await chamar({ acao: "eu" }, r.token);
+  assert.equal(eu.organizacao.onboarding, false);
+  assert.equal(eu.organizacao.primeirosPassos, true, "checklist continua por 14 dias");
+  const antiga = (await chamar({ acao: "eu" }, ana)).organizacao;
+  assert.equal(antiga.onboarding, true, "a Ana foi criada nos testes, depois da migração");
+});

@@ -39,7 +39,9 @@ async function abrirSessao(usuario, org, lembrar) {
 export async function descrever(usuarioId, orgAtual) {
   const u = (await db().query("select id, email, nome from usuarios where id = $1", [usuarioId])).rows[0];
   const orgs = (await db().query(
-    "select o.id, o.nome, m.papel from membros m join organizacoes o on o.id = m.org_id where m.usuario_id = $1 order by o.nome", [usuarioId])).rows;
+    "select o.id, o.nome, m.papel, o.onboarding_em from membros m join organizacoes o on o.id = m.org_id where m.usuario_id = $1 order by o.nome", [usuarioId])).rows
+    // onboarding: o primeiro acesso ainda não foi feito; primeirosPassos: terminou há menos de 14 dias (mostra o checklist).
+    .map(({ onboarding_em, ...o }) => ({ ...o, onboarding: !onboarding_em, primeirosPassos: !onboarding_em || Date.now() - new Date(onboarding_em) < 14 * 86400000 }));
   const atual = orgs.find(o => o.id === orgAtual) || orgs[0] || null;
   return { usuario: { id: u.id, email: u.email, nome: u.nome, papel: atual ? atual.papel : null, admin: ehAdmin(u.email) || undefined }, organizacoes: orgs, organizacao: atual };
 }
@@ -128,6 +130,11 @@ export const acoesConta = {
     return descrever(ctx.usuario.id, c.org_id);
   },
 
+  // Fim do primeiro acesso (concluído ou "fazer depois"): o passo a passo não abre mais sozinho.
+  async concluirOnboarding(ctx) {
+    await db().query("update organizacoes set onboarding_em = coalesce(onboarding_em, now()) where id = $1", [ctx.org]);
+    return {};
+  },
   async criarOrganizacao(ctx, b) {
     const nome = texto(b.nome, 100);
     if (!nome) falha("Dê um nome para a organização.");
