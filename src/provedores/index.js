@@ -20,7 +20,7 @@ export async function chaveDe(org, provedor) {
 }
 
 // Guarda o que cada chamada de IA consumiu (relatório de controle). Uma falha aqui nunca derruba a tarefa.
-async function registrarConsumo(org, provedor, d) {
+export async function registrarConsumo(org, provedor, d) {
   try {
     const propria = (await db().query("select 1 from integracoes where org_id = $1 and provedor = $2", [org, provedor])).rows.length > 0;
     await db().query("insert into consumo (org_id, provedor, tipo, entrada, saida, cache_leitura, cache_escrita, quantidade, chave_propria) values ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
@@ -137,7 +137,9 @@ export async function coletarApify(org, actor, input) {
     method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${chave}` }, body: JSON.stringify(input),
   }, 300000);
   if (!r.ok) throw new ErroIntegracao("a Apify recusou a coleta: " + String((r.json && r.json.error && r.json.error.message) || r.txt).slice(0, 200));
-  return Array.isArray(r.json) ? r.json : [];
+  const itens = Array.isArray(r.json) ? r.json : [];
+  await registrarConsumo(org, "apify", { tipo: "coleta", quantidade: itens.length });
+  return itens;
 }
 
 /* ---------- Zernio (publicação) ---------- */
@@ -248,6 +250,7 @@ export async function publicarZernio(org, { rede, midias, legenda, opcoes, chave
   const ler = j => { const post = (j && j.post) || {}; const p = (post.platforms || [])[0] || {}; return { post, p }; };
   let { post, p } = ler(r.json);
   if (!post._id) return { ok: false, erro: "o Zernio recusou o post: " + String((r.json && (r.json.error || r.json.message)) || r.txt).slice(0, 300) };
+  await registrarConsumo(org, "zernio", { tipo: "publicacao", quantidade: 1 });
   const intervalo = Number(process.env.ZERNIO_INTERVALO_MS) || 15000; // os testes encurtam a espera
   for (let k = 0; k < 40 && !["published", "failed", "partial"].includes(post.status); k++) {
     await esperar(intervalo);

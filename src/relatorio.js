@@ -4,9 +4,7 @@
 import crypto from "node:crypto";
 import { db } from "./db.js";
 import { PLANOS, totalDo, CICLOS, isentos } from "./planos.js";
-
-// Preço por milhão de tokens e por item, em US$, para estimar o custo (mesmos valores do PRECOS.md).
-const CUSTO = { entrada: 4, saida: 20, cacheLeitura: 0.4, cacheEscrita: 5, foto: 0.07, fotoPessoa: 0.07, clipeSegundo: 0.1 };
+import { custoDe } from "./custos.js";
 
 export const COLUNAS = [
   ["nome", "Nome"], ["email", "E-mail"], ["cadastrado_em", "Cadastro"], ["ultimo_acesso", "Último acesso"],
@@ -26,8 +24,7 @@ export const COLUNAS = [
 const FUSO = new Intl.DateTimeFormat("sv-SE", { timeZone: process.env.FUSO_RELATORIO || "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
 const dataIso = d => (d ? FUSO.format(new Date(d)) : "");
 const dinheiro = v => (Math.round(v * 100) / 100).toFixed(2);
-const custo = c => (Number(c.entrada) * CUSTO.entrada + Number(c.saida) * CUSTO.saida + Number(c.cache_leitura) * CUSTO.cacheLeitura + Number(c.cache_escrita) * CUSTO.cacheEscrita) / 1e6
-  + Number(c.fotos) * CUSTO.foto + Number(c.fotos_pessoa) * CUSTO.fotoPessoa + Number(c.segundos) * CUSTO.clipeSegundo;
+const custo = c => custoDe("anthropic", "", c) + custoDe("magnific", "foto", { quantidade: c.fotos }) + custoDe("magnific", "foto_pessoa", { quantidade: c.fotos_pessoa }) + custoDe("magnific", "clipe", { quantidade: c.segundos });
 
 export async function linhasRelatorio() {
   const inicioMes = new Date(); inicioMes.setDate(1); inicioMes.setHours(0, 0, 0, 0);

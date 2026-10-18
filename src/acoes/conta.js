@@ -1,5 +1,6 @@
 // Contas, sessões, organizações, membros, convites e chaves das integrações.
 import { db } from "../db.js";
+import { ehAdmin } from "../admin.js";
 import { config } from "../config.js";
 import { hashSenha, conferirSenha, novoToken, hashToken, cifrar } from "../cripto.js";
 import { falha, exigirId, texto } from "../erros.js";
@@ -40,7 +41,7 @@ export async function descrever(usuarioId, orgAtual) {
   const orgs = (await db().query(
     "select o.id, o.nome, m.papel from membros m join organizacoes o on o.id = m.org_id where m.usuario_id = $1 order by o.nome", [usuarioId])).rows;
   const atual = orgs.find(o => o.id === orgAtual) || orgs[0] || null;
-  return { usuario: { id: u.id, email: u.email, nome: u.nome, papel: atual ? atual.papel : null }, organizacoes: orgs, organizacao: atual };
+  return { usuario: { id: u.id, email: u.email, nome: u.nome, papel: atual ? atual.papel : null, admin: ehAdmin(u.email) || undefined }, organizacoes: orgs, organizacao: atual };
 }
 
 async function convitePorToken(token) {

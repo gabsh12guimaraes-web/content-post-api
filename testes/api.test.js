@@ -802,3 +802,22 @@ test("relatório no formato da planilha em português: decimais com vírgula", a
     assert.match(ana, /,"7,28",/);
   } finally { delete process.env.RELATORIO_CHAVE; }
 });
+
+test("painel admin: só o e-mail admin acessa; soma usuários, receita e custos da plataforma", async () => {
+  const negado = await chamar({ acao: "painelAdmin" }, ana);
+  assert.equal(negado.status, 403, "Ana não é admin");
+  process.env.ADMIN_EMAILS = "ana@exemplo.com";
+  try {
+    const eu = await chamar({ acao: "eu" }, ana);
+    assert.equal(eu.usuario.admin, true);
+    await db().query("insert into consumo (org_id, provedor, tipo, quantidade, chave_propria) values ($1, 'apify', 'coleta', 1000, false), ($1, 'zernio', 'publicacao', 3, false), ($1, 'magnific', 'foto', 10, true)", [anaOrg]);
+    const r = await chamar({ acao: "painelAdmin" }, ana);
+    assert.equal(r.status, 200, r.erro);
+    assert.ok(r.usuarios.total >= 3);
+    assert.equal(r.serie.length, 30);
+    assert.equal(r.custos.periodos.d30.apify.plataforma.usd, 2.3);
+    assert.ok(r.custos.periodos.d30.zernio.plataforma.quantidade >= 3, "publicações contam (inclui as dos outros testes)");
+    assert.ok(r.custos.periodos.d30.magnific.propria.quantidade >= 10, "chave própria fica separada");
+    assert.ok(r.topOrgs.some(o => o.nome === "Easypeasy"));
+  } finally { delete process.env.ADMIN_EMAILS; }
+});

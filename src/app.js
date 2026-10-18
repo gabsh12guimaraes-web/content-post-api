@@ -10,12 +10,15 @@ import { acoesConta, acoesOrg } from "./acoes/conta.js";
 import { acoesPauta } from "./acoes/pauta.js";
 import { ErroIntegracao } from "./provedores/index.js";
 import { relatorioCsv, chaveRelatorioOk } from "./relatorio.js";
+import { painelAdmin } from "./admin.js";
 import { catalogo, situacao, assinaturaKiwifyOk, avisoKiwify } from "./planos.js";
 
 const PUBLICAS = new Set(["cadastrar", "entrar", "verConvite", "planos"]);
-const SEM_ORG = new Set(["eu", "sair", "trocarSenha", "aceitarConvite", "criarOrganizacao", "trocarOrganizacao"]);
+const SEM_ORG = new Set(["eu", "sair", "trocarSenha", "aceitarConvite", "criarOrganizacao", "trocarOrganizacao", "painelAdmin"]);
 const acoesPlano = {
   async planos() { return catalogo(); },
+  // Painel admin da plataforma (só ADMIN_EMAILS).
+  painelAdmin,
   // Plano da organização, uso do mês e links de checkout já com a organização (sck) e o e-mail preenchidos.
   async plano(ctx) {
     const c = catalogo(), s = await situacao(ctx.org);
