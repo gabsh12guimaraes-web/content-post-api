@@ -72,6 +72,18 @@ async function tarefaMagnific(org, criar, ver, corpo, { intervalo = 15000, limit
 const PROPORCAO = { "4:5": "social_post_4_5", "1:1": "square_1_1", "9:16": "social_story_9_16", "16:9": "widescreen_16_9" };
 export const gerarFoto = (org, prompt, proporcao) =>
   tarefaMagnific(org, "/v1/ai/mystic", "/v1/ai/mystic", { prompt, aspect_ratio: PROPORCAO[proporcao] || "social_post_4_5" }, { intervalo: 10000, limiteMs: 15 * 60000 });
+// Foto com uma pessoa real: o Seedream 4.5 Edit recebe a foto de rosto como referência e põe a pessoa na cena do prompt.
+const PROPORCAO_SEEDREAM = { "4:5": "traditional_3_4", "1:1": "square_1_1", "9:16": "social_story_9_16", "16:9": "widescreen_16_9" };
+export async function gerarFotoComPessoa(org, prompt, proporcao, rosto) {
+  const corpo = { prompt, reference_images: [rosto], aspect_ratio: PROPORCAO_SEEDREAM[proporcao] || "traditional_3_4", enable_safety_checker: true };
+  const ir = c => tarefaMagnific(org, "/v1/ai/text-to-image/seedream-v4-5-edit", "/v1/ai/text-to-image/seedream-v4-5-edit", c, { intervalo: 10000, limiteMs: 15 * 60000 });
+  try { return await ir(corpo); }
+  catch (e) {
+    // Se o Magnific não aceitar a proporção, gera na proporção padrão (a arte recorta depois).
+    if (e instanceof ErroIntegracao && /aspect/i.test(e.message)) { delete corpo.aspect_ratio; return ir(corpo); }
+    throw e;
+  }
+}
 export const gerarClipe = (org, { prompt, duracao, proporcao, imagem }) =>
   tarefaMagnific(org, "/v1/ai/video/kling-v3-std", "/v1/ai/video/kling-v3",
     Object.assign({ prompt, duration: String(Math.min(10, Math.max(3, Math.round(Number(duracao) || 5)))), aspect_ratio: proporcao, generate_audio: false, cfg_scale: 0.5 }, imagem ? { start_image_url: imagem } : {}),

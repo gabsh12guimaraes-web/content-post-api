@@ -38,6 +38,7 @@ function limparBriefing(r) {
     story: um(r.story, ["imagem", "continuo", "varios"]),
     imagens: um(r.imagens, ["ia", "banco", "misto"]),
     banco: Array.isArray(r.banco) ? r.banco.filter(x => UUID.test(String(x))).slice(0, 20) : undefined,
+    pessoa: UUID.test(String(r.pessoa || "")) ? String(r.pessoa) : undefined,
   };
   Object.keys(br).forEach(k => br[k] === undefined && delete br[k]);
   return br;
@@ -98,6 +99,28 @@ export const acoesPauta = {
       if (antigo) await apagarArquivos(ctx.org, [antigo]);
     }
     return { id };
+  },
+
+  /* ---------- pessoas (foto de rosto para posts humanizados) ---------- */
+  async listarPessoas(ctx) {
+    const { rows } = await db().query("select * from pessoas where org_id = $1 order by criado_em desc", [ctx.org]);
+    const a = await anexos(ctx.org, rows.map(r => r.arquivo_id));
+    return { pessoas: rows.map(r => ({ id: r.id, nome: r.nome, arquivo: a.get(r.arquivo_id) || null })).filter(x => x.arquivo) };
+  },
+  async enviarPessoa(ctx, b) {
+    if (b.autorizado !== true) falha("Confirme que você tem autorização desta pessoa para usar a imagem dela.");
+    if (!["image/png", "image/jpeg", "image/webp"].includes(b.tipo)) falha("Envie a foto em JPG, PNG ou WEBP.");
+    const total = (await db().query("select count(*)::int as n from pessoas where org_id = $1", [ctx.org])).rows[0].n;
+    if (total >= 30) falha("Cadastre até 30 pessoas. Remova alguma para enviar outra.");
+    const arquivo = await salvarArquivo(ctx.org, { tipo: b.tipo, nome: b.nome || "rosto", dados: doBase64(b.base64, 8 * 1024 * 1024) });
+    const { rows } = await db().query("insert into pessoas (org_id, arquivo_id, nome, autorizado_por) values ($1, $2, $3, $4) returning id", [ctx.org, arquivo, texto(b.nome, 60), ctx.usuario.id]);
+    return { id: rows[0].id };
+  },
+  async removerPessoa(ctx, b) {
+    const r = (await db().query("delete from pessoas where id = $1 and org_id = $2 returning arquivo_id", [exigirId(b.id), ctx.org])).rows[0];
+    if (!r) falha("Pessoa não encontrada.", 404);
+    await apagarArquivos(ctx.org, [r.arquivo_id]);
+    return {};
   },
 
   /* ---------- banco de imagens ---------- */
@@ -374,6 +397,11 @@ export const acoesPauta = {
     const p = await postDaOrg(ctx.org, b.id);
     if (!["Planejado", "Erro"].includes(p.status)) falha("Este post já foi criado.");
     const br = limparBriefing(b.briefing);
+    if (br.pessoa) {
+      const pe = (await db().query("select nome from pessoas where id = $1 and org_id = $2", [br.pessoa, ctx.org])).rows[0];
+      if (!pe) falha("Essa pessoa não está mais cadastrada. Escolha outra ou envie a foto de novo.");
+      if (pe.nome) br.pessoaNome = pe.nome;
+    }
     await usar(ctx.org, "post");
     await db().query("update posts set status = 'EmCriacao', erro = null, briefing = $2, atualizado_em = now() where id = $1", [p.id, Object.keys(br).length ? JSON.stringify(br) : null]);
     await enfileirar(ctx.org, "criar", { post: p.id }, ctx.usuario.id);

@@ -1,6 +1,6 @@
 // O que antes rodava nos fluxos 01 (ideias), 03 e 05 (criação), 04 (ajuste) e 06 (publicação) do n8n.
 import { db } from "../db.js";
-import { claude, gerarFoto, gerarClipe, coletarApify, publicarZernio, chaveDe, ErroIntegracao } from "../provedores/index.js";
+import { claude, gerarFoto, gerarFotoComPessoa, gerarClipe, coletarApify, publicarZernio, chaveDe, ErroIntegracao } from "../provedores/index.js";
 import { guardarDeUrl, apagarArquivos, anexos } from "../arquivos.js";
 import { registrar } from "./fila.js";
 import { SISTEMA_IDEIAS, SISTEMA_POST, SISTEMA_AJUSTE, SISTEMA_ESCOLHA_BANCO, idiomaDe, briefingTexto } from "./prompts.js";
@@ -133,8 +133,17 @@ export async function guardarNoBanco(org, arquivo, { nome, descricao, video, pos
   } catch (e) { console.error("[banco]", e.message); }
 }
 const nomeNoBanco = (post, n) => (String(post.titulo || "Post").slice(0, 64) + " · " + n).slice(0, 80);
+// Foto de rosto da pessoa escolhida no briefing (posts humanizados), como link público para o Magnific.
+async function rostoDoPost(org, post) {
+  const id = post.briefing && post.briefing.pessoa;
+  if (!id) return null;
+  const p = (await db().query("select arquivo_id from pessoas where id = $1 and org_id = $2", [id, org])).rows[0];
+  return p ? ((await anexos(org, [p.arquivo_id])).get(p.arquivo_id) || {}).url || null : null;
+}
 async function gerarMidias(org, post, c, regerar) {
   const video = ehVideo(post.formato, post);
+  const rosto = await rostoDoPost(org, post);
+  const foto = (x, proporcao) => (rosto && x.pessoa ? gerarFotoComPessoa(org, x.prompt, proporcao, rosto) : gerarFoto(org, x.prompt, proporcao));
   const fotos = { ...(post.fotos || {}) }, clipes = { ...(post.clipes || {}) };
   const velhos = [];
   const precisa = (mapa, n) => (regerar ? regerar.includes(n) : !mapa[n]);
@@ -147,9 +156,23 @@ async function gerarMidias(org, post, c, regerar) {
       if (!n || !precisa(fotos, n)) continue;
       if (semCredito) { falhas++; continue; }
       try {
-        const url = await gerarFoto(org, x.prompt, x.proporcao);
+        const url = await foto(x, x.proporcao);
         const id = await guardarDeUrl(org, url, `foto-${n}`);
         await guardarNoBanco(org, id, { nome: nomeNoBanco(post, n), descricao: x.prompt, post: post.id });
+        if (fotos[n]) velhos.push(fotos[n]);
+        fotos[n] = id;
+      } catch (e) { falhou("foto", e); }
+    }
+  }
+  // Em Reels e Stories, a cena com a pessoa ganha um primeiro quadro com ela, que o Kling anima.
+  if (video && rosto) {
+    for (const [i, x] of (c.cenas || []).entries()) {
+      const n = Number(x.n) || i + 1;
+      if (!x.pessoa || !precisa(clipes, n) || (fotos[n] && !(regerar || []).includes(n))) continue;
+      if (semCredito) { falhas++; continue; }
+      try {
+        const url = await foto({ pessoa: true, prompt: x.prompt_imagem || x.visual || post.titulo }, "9:16");
+        const id = await guardarDeUrl(org, url, `quadro-${n}`);
         if (fotos[n]) velhos.push(fotos[n]);
         fotos[n] = id;
       } catch (e) { falhou("foto", e); }

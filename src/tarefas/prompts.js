@@ -39,7 +39,7 @@ Regras de imagem e vídeo (o Magnific gera; o texto e o logo entram depois, pela
 - Prompts em inglês, descritivos, com estilo, luz e enquadramento.
 - "prompt_video" (cenas de Reels e slides com usa_video) descreve o movimento: o que se mexe, a câmera (dolly, pan, close), luz e clima, em uma ou duas frases. Vídeo vertical para Reels.
 - Nunca peça texto escrito dentro da imagem ou do vídeo.
-- Nunca peça logotipos ou pessoas reais identificáveis.
+- Nunca peça logotipos ou pessoas reais identificáveis (a única exceção é a pessoa da foto de referência, quando o <briefing> pedir).
 - Quando fizer sentido, puxe a direção de arte para as cores de <marca><cores> (fundo, luz, objetos), sem deixar a imagem artificial.
 - Se a mensagem trouxer imagens de mood board da marca, use-as como referência de estilo (paleta, luz, textura, enquadramento, clima) nos prompts de imagem e de vídeo. Não copie objetos, pessoas ou textos delas.
 
@@ -50,12 +50,18 @@ Banco de imagens:
 - Escreva o texto em cima do que a foto mostra de verdade (cor, modelo, tipo do produto). Não invente características que a descrição não traz.
 - Em cenas de vídeo com "imagem_banco", o "prompt_video" descreve um movimento suave sobre aquela foto (zoom lento, giro de câmera, tecido balançando), sem mudar o produto.
 
+Pessoa real (posts humanizados):
+- Se o <briefing> trouxer uma pessoa real, a plataforma manda a foto de rosto dela para o gerador de imagem. Ponha a pessoa onde ela faz sentido (capa, bastidores, quem fala com o público), não necessariamente em todas as imagens.
+- Nesses itens de "prompts_imagem", coloque "pessoa": true e escreva o prompt com "the person from the reference photo" fazendo algo concreto: ação, pose, roupa, cenário, luz e enquadramento (de preferência meio corpo ou close, olhando para a câmera ou em ação natural). Não descreva rosto, idade, etnia, cabelo ou corpo: isso vem da foto.
+- Em Reels e Stories em vídeo, marque "pessoa": true na cena e escreva "prompt_imagem" (em inglês) com o primeiro quadro da cena mostrando a pessoa; o "prompt_video" descreve o movimento a partir dele (gestos leves, câmera suave).
+- Não invente o nome nem o cargo da pessoa na legenda ou nos slides, a não ser que o briefing diga.
+
 Briefing:
 - Se a mensagem trouxer <briefing>, ele foi escolhido pela pessoa e tem prioridade sobre as regras de formato acima (quantidade de slides, capa, onde vai foto ou vídeo, duração, número de cenas). Nesse caso o limite de 3 slides em vídeo não vale.
 - Slide com vídeo sempre leva também "usa_imagem": true e um prompt de imagem (a imagem é o primeiro quadro do vídeo). Slide "só texto" leva "usa_imagem": false e "usa_video": false.
 
 Responda APENAS com um objeto JSON neste formato:
-{"legenda":"","hashtags":["#..."],"slides":[{"n":1,"titulo":"","texto":"","usa_imagem":true,"usa_video":false,"prompt_video":"","imagem_banco":""}],"cenas":[{"n":1,"duracao_s":5,"visual":"","fala_ou_texto":"","prompt_video":"","imagem_banco":""}],"prompts_imagem":[{"slide":1,"prompt":"","proporcao":"4:5"}]}
+{"legenda":"","hashtags":["#..."],"slides":[{"n":1,"titulo":"","texto":"","usa_imagem":true,"usa_video":false,"prompt_video":"","imagem_banco":""}],"cenas":[{"n":1,"duracao_s":5,"visual":"","fala_ou_texto":"","prompt_video":"","imagem_banco":"","pessoa":false,"prompt_imagem":""}],"prompts_imagem":[{"slide":1,"prompt":"","proporcao":"4:5","pessoa":false}]}
 "slides" é usado em Carrossel e Estatico; "cenas" em Reels e Stories. O que não se aplica vem como lista vazia.`;
 
 export const SISTEMA_AJUSTE = `Você está revisando um post da marca descrita em <marca>, a pedido da pessoa responsável pela marca.
@@ -67,6 +73,7 @@ Regras:
 4. Se o pedido violar <marca><evitar>, não aplique essa parte e explique em "resumo_mudancas".
 5. Continue seguindo o tom de voz, o idioma (<marca><idioma>) e as regras de formato da marca.
 6. Se mudou o conteúdo de um slide ou cena que tem imagem ou vídeo, avalie se o prompt também precisa mudar. Liste em "alterou_imagens" só os slides ou cenas cuja IMAGEM ou VÍDEO precisa ser gerado de novo.
+7. Mantenha "pessoa" (e "prompt_imagem" das cenas) como estão, a não ser que o comentário peça para tirar ou colocar a pessoa da foto de referência numa imagem.
 
 Responda APENAS com um objeto JSON com os mesmos campos da versão atual (legenda, hashtags, slides, cenas, prompts_imagem) mais:
 "alterou_legenda": true|false, "alterou_slides": [números], "alterou_imagens": [números], "resumo_mudancas": "frase curta dizendo o que mudou"`;
@@ -116,6 +123,7 @@ export function briefingTexto(b, formato) {
   }
   const img = { banco: 'todas as imagens vêm do <banco_de_imagens> ("imagem_banco" em cada slide ou cena com imagem); não gere prompts de imagem', misto: 'use o <banco_de_imagens> para mostrar os produtos e gere imagens com IA só para ambientação ou conceito' }[b.imagens];
   if (img) L.push('- ' + img);
+  if (b.pessoa) L.push('- pessoa real: mostre a pessoa da foto de referência' + (b.pessoaNome ? ' (' + String(b.pessoaNome).slice(0, 60) + ')' : '') + ' nas imagens onde ela faz sentido, com "pessoa": true (veja as regras de pessoa real)');
   const obj = { engajar: 'engajar (comentários, salvamentos, compartilhamentos)', educar: 'educar e tirar dúvidas', vender: 'converter: levar para compra ou cadastro', institucional: 'fortalecer a marca' }[b.objetivo];
   if (obj) L.push('- objetivo: ' + obj);
   if (b.observacoes) L.push('- observações da pessoa: ' + String(b.observacoes).slice(0, 1000));

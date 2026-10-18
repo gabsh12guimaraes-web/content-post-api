@@ -698,3 +698,54 @@ test("IA escolhe no banco as fotos que combinam com o post", async () => {
   const p = (await chamar({ acao: "pauta" }, ana)).posts.find(x => x.id === id);
   assert.equal(p.Status, "Planejado", "não cria o post nem gasta o limite");
 });
+
+test("pessoa real: exige autorização, vai como referência no Seedream e só nas imagens marcadas", async () => {
+  const semOk = await chamar({ acao: "enviarPessoa", tipo: "image/jpeg", nome: "Gabriel", base64: JPG }, ana);
+  assert.equal(semOk.status, 400);
+  const { id: pessoa } = await chamar({ acao: "enviarPessoa", tipo: "image/jpeg", nome: "Gabriel", base64: JPG, autorizado: true }, ana);
+  assert.equal((await chamar({ acao: "listarPessoas" }, ana)).pessoas[0].nome, "Gabriel");
+  const outra = await chamar({ acao: "cadastrar", nome: "Fábio", email: "pessoa-teste@exemplo.org", senha: "segredo123", organizacao: "Outra" });
+  assert.equal((await chamar({ acao: "listarPessoas" }, outra.token)).pessoas.length, 0, "cada organização vê só as suas");
+
+  const i = (await db().query("insert into ideias (org_id, titulo, formato, rede, score) values ($1, 'Bastidores com o fundador', 'Carrossel', 'Instagram', 8) returning id", [anaOrg])).rows[0].id;
+  const { id } = await chamar({ acao: "agendarIdeia", id: i, data: new Date(Date.now() + 5 * 86400000).toISOString() }, ana);
+  const original = globalThis.fetch, pedidos = [];
+  let corpoClaude = null, corpoSeedream = null;
+  globalThis.fetch = async (url, op = {}) => {
+    const u = String(url); pedidos.push(u);
+    const json = o => new Response(JSON.stringify(o), { headers: { "content-type": "application/json" } });
+    if (u.includes("anthropic.com")) {
+      corpoClaude = JSON.parse(op.body);
+      return json({ content: [{ type: "text", text: JSON.stringify({ legenda: "L", hashtags: [], cenas: [],
+        slides: [{ n: 1, titulo: "Capa", texto: "", usa_imagem: true }, { n: 2, titulo: "Produto", texto: "", usa_imagem: true }],
+        prompts_imagem: [{ slide: 1, prompt: "the person from the reference photo behind the bar", proporcao: "4:5", pessoa: true }, { slide: 2, prompt: "a bracelet", proporcao: "4:5" }] }) }], stop_reason: "end_turn" });
+    }
+    if (u.endsWith("/seedream-v4-5-edit") && op.method === "POST") { corpoSeedream = JSON.parse(op.body); return json({ data: { task_id: "s1", status: "CREATED" } }); }
+    if (u.includes("/seedream-v4-5-edit/s1")) return json({ data: { status: "COMPLETED", generated: ["https://cdn.exemplo/pessoa.jpg"] } });
+    if (u.endsWith("/v1/ai/mystic") && op.method === "POST") return json({ data: { task_id: "m1", status: "CREATED" } });
+    if (u.includes("/v1/ai/mystic/m1")) return json({ data: { status: "COMPLETED", generated: ["https://cdn.exemplo/produto.jpg"] } });
+    if (u.startsWith("https://cdn.exemplo/")) return new Response(Buffer.from(JPG, "base64"), { headers: { "content-type": "image/jpeg" } });
+    return original(url, op);
+  };
+  try {
+    assert.equal((await chamar({ acao: "criarPost", id, briefing: { pessoa } }, outra.token)).status, 404, "outra organização não usa o post nem a pessoa");
+    assert.equal((await chamar({ acao: "criarPost", id, briefing: { capa: "foto", fundo: "fotos", slides: "2", pessoa } }, ana)).status, 200);
+    await puxar();
+    for (let k = 0; k < 100; k++) {
+      const st = (await db().query("select status from tarefas where tipo = 'criar' order by criado_em desc limit 1")).rows[0].status;
+      if (st === "feito" || st === "erro") break;
+      await new Promise(r => setTimeout(r, 50));
+    }
+  } finally { globalThis.fetch = original; }
+  const t = (await db().query("select status, erro from tarefas where tipo = 'criar' order by criado_em desc limit 1")).rows[0];
+  assert.equal(t.status, "feito", t.erro || "");
+  assert.match(JSON.stringify(corpoClaude.messages[0].content), /pessoa real: mostre a pessoa da foto de referência \(Gabriel\)/);
+  const rosto = (await chamar({ acao: "listarPessoas" }, ana)).pessoas[0].arquivo.url;
+  assert.deepEqual(corpoSeedream.reference_images, [rosto]);
+  assert.equal(pedidos.filter(u => u.endsWith("/v1/ai/mystic")).length, 1, "o slide sem pessoa vai para o Mystic");
+  const p = (await chamar({ acao: "pauta" }, ana)).posts.find(x => x.id === id);
+  assert.equal(p.Fotos.length, 2);
+
+  assert.equal((await chamar({ acao: "removerPessoa", id: pessoa }, ana)).status, 200);
+  assert.equal((await chamar({ acao: "listarPessoas" }, ana)).pessoas.length, 0);
+});
