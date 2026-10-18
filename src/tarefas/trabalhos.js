@@ -8,7 +8,8 @@ import { devolver } from "../planos.js";
 import { lerArquivo } from "../arquivos.js";
 
 // Story em imagem estática segue o caminho das fotos (1 imagem vertical); os outros stories e os Reels são vídeo.
-const ehStoryImagem = post => post.formato === "Stories" && post.briefing && post.briefing.story === "imagem";
+// Story em imagem: uma só ("imagem") ou uma sequência de várias telas ("sequencia"); os dois seguem o caminho das fotos.
+const ehStoryImagem = post => post.formato === "Stories" && post.briefing && ["imagem", "sequencia"].includes(post.briefing.story);
 const ehVideo = (formato, post) => ["Reels", "Stories"].includes(formato) && !(post && ehStoryImagem(post));
 const marcaDe = async org => (await db().query("select * from marcas where org_id = $1", [org])).rows[0] || { org_id: org, pilares: [], redes: [], mood_board: [] };
 const postDe = async (org, id) => (await db().query("select * from posts where id = $1 and org_id = $2", [id, org])).rows[0];
@@ -286,7 +287,7 @@ export async function escolherDoBanco(org, post, briefing) {
   });
   const m = await marcaDe(org);
   const ideia = post.ideia_id ? (await db().query("select resumo from ideias where id = $1", [post.ideia_id])).rows[0] : null;
-  const slides = ehVideo(post.formato, { ...post, briefing }) ? Number(briefing.cenas) || 6 : post.formato === "Estatico" || ehStoryImagem({ ...post, briefing }) ? 2 : Number(briefing.slides) || 8;
+  const slides = ehVideo(post.formato, { ...post, briefing }) ? Number(briefing.cenas) || 6 : post.formato === "Estatico" || (ehStoryImagem({ ...post, briefing }) && briefing.story !== "sequencia") ? 2 : Number(briefing.slides) || 8;
   const user = [blocoMarca(m), "", "<post>", "titulo: " + post.titulo, "formato: " + (post.formato || ""), "pilar: " + (post.pilar || ""), "</post>", "",
     "<ideia>" + ((ideia && ideia.resumo) || post.titulo) + "</ideia>", "", briefingTexto(briefing, post.formato), "", "<banco_de_imagens>", ...linhas, "</banco_de_imagens>"].join("\n");
   const c = await claude(org, { system: SISTEMA_ESCOLHA_BANCO.replace("{{maximo}}", String(Math.min(20, slides))), content: user, effort: "low", max_tokens: 2000, tipo: "escolher_banco" });
@@ -385,10 +386,10 @@ export function conteudoPara(nome, p, midias) {
   const story = p.formato === "Stories";
   if (story && !["Instagram", "Facebook"].includes(nome)) return { erro: "Stories só vão para o Instagram e o Facebook" };
   switch (nome) {
-    case "Instagram": return { midias, legenda: story ? "" : legenda, opcoes: story ? { contentType: "story" } : null };
+    case "Instagram": return { midias: story ? midias.slice(0, 10) : midias, legenda: story ? "" : legenda, opcoes: story ? { contentType: "story" } : null };
     case "Facebook": {
       const m = imagens.length && videos.length ? imagens : midias; // o Facebook não mistura fotos e vídeo
-      if (story) return { midias: m.slice(0, 1), legenda: "", opcoes: { contentType: "story" } };
+      if (story) return { midias: m.slice(0, 10), legenda: "", opcoes: { contentType: "story" } };
       if (p.formato === "Reels" && videos.length === 1 && !imagens.length) return { midias: videos, legenda, opcoes: { contentType: "reel", title: cortar(p.titulo, 100) } };
       return { midias: m.slice(0, 10), legenda, opcoes: null };
     }
@@ -432,6 +433,19 @@ async function publicarPost(p) {
         if (links[nome]) continue; // já saiu nessa rede numa tentativa anterior
         const c = conteudoPara(nome, p, midias);
         if (c.erro) { falhas.push(`${nome}: ${c.erro}`); continue; }
+        if (p.formato === "Stories" && c.midias.length > 1) {
+          // Sequência de stories: um story por imagem, na ordem. O que já saiu fica anotado para uma nova tentativa não repetir.
+          let tudo = true;
+          for (const [k, m] of c.midias.entries()) {
+            const parte = `${nome} · story ${k + 1}`;
+            if (links[parte]) continue;
+            const r = await publicarZernio(p.org_id, { rede: REDES[nome], midias: [m], legenda: "", opcoes: c.opcoes, chave: `pauta-${p.id}-${p.versao}-${REDES[nome]}-${k + 1}` });
+            if (r.id) ids.push(r.id);
+            if (r.ok) links[parte] = r.link || "publicado"; else { tudo = false; falhas.push(`${parte}: ${r.erro}`); break; }
+          }
+          if (tudo) { links[nome] = links[`${nome} · story 1`]; c.midias.forEach((_, k) => delete links[`${nome} · story ${k + 1}`]); }
+          continue;
+        }
         const r = await publicarZernio(p.org_id, { rede: REDES[nome], midias: c.midias, legenda: c.legenda, opcoes: c.opcoes, chave: `pauta-${p.id}-${p.versao}-${REDES[nome]}` });
         if (r.id) ids.push(r.id);
         if (r.ok) links[nome] = r.link || "publicado"; else falhas.push(`${nome}: ${r.erro}`);

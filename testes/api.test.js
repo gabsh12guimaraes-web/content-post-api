@@ -895,3 +895,46 @@ test("onboarding: organização nova começa pendente; concluir marca como feito
   const antiga = (await chamar({ acao: "eu" }, ana)).organizacao;
   assert.equal(antiga.onboarding, true, "a Ana foi criada nos testes, depois da migração");
 });
+
+test("story em sequência: a IA faz várias telas 9:16 e cada imagem sai como um story, na ordem", async () => {
+  const i = (await db().query("insert into ideias (org_id, titulo, formato, rede, score) values ($1, 'Sequência de sexta', 'Stories', 'Instagram', 8) returning id", [anaOrg])).rows[0].id;
+  const { id } = await chamar({ acao: "agendarIdeia", id: i, data: new Date(Date.now() + 6 * 86400000).toISOString() }, ana);
+  const original = globalThis.fetch;
+  let corpoClaude = null; const mystic = [], stories = [];
+  process.env.ZERNIO_INTERVALO_MS = "5";
+  globalThis.fetch = async (url, op = {}) => {
+    const u = String(url);
+    const json = (o, s) => new Response(JSON.stringify(o), { status: s || 200, headers: { "content-type": "application/json" } });
+    if (u.includes("anthropic.com")) { corpoClaude = JSON.parse(op.body); return json({ content: [{ type: "text", text: JSON.stringify({ legenda: "", hashtags: [], cenas: [],
+      slides: [1, 2, 3].map(n => ({ n, titulo: "Story " + n, texto: "", usa_imagem: true })), prompts_imagem: [1, 2, 3].map(n => ({ slide: n, prompt: "bar " + n, proporcao: "9:16" })) }) }], stop_reason: "end_turn" }); }
+    if (u.endsWith("/v1/ai/mystic") && op.method === "POST") { mystic.push(JSON.parse(op.body)); return json({ data: { task_id: "sq" + mystic.length, status: "CREATED" } }); }
+    if (/\/v1\/ai\/mystic\/sq\d/.test(u)) return json({ data: { status: "COMPLETED", generated: ["https://cdn.exemplo/sq.jpg"] } });
+    if (u === "https://cdn.exemplo/sq.jpg") return new Response(Buffer.from(JPG, "base64"), { headers: { "content-type": "image/jpeg" } });
+    if (u.endsWith("zernio.com/api/v1/accounts")) return json({ accounts: [{ _id: "acc1", platform: "instagram", username: "easypeasy", isActive: true }] });
+    if (u.endsWith("zernio.com/api/v1/posts")) { const c = JSON.parse(op.body); stories.push(c); return json({ post: { _id: "st" + stories.length, status: "publishing", platforms: [{ platform: "instagram", status: "publishing" }] } }, 201); }
+    const m = /zernio\.com\/api\/v1\/posts\/(st\d+)/.exec(u);
+    if (m) return json({ post: { _id: m[1], status: "published", platforms: [{ platform: "instagram", status: "published", platformPostUrl: "https://instagram.com/stories/" + m[1] }] } });
+    return original(url, op);
+  };
+  try {
+    assert.equal((await chamar({ acao: "criarPost", id, briefing: { story: "sequencia", slides: "3", fundo: "fotos" } }, ana)).status, 200);
+    await puxar();
+    for (let k = 0; k < 100; k++) { const st = (await db().query("select status from tarefas where tipo = 'criar' order by criado_em desc limit 1")).rows[0].status; if (st === "feito" || st === "erro") break; await new Promise(r => setTimeout(r, 50)); }
+    const t = (await db().query("select status, erro from tarefas where tipo = 'criar' order by criado_em desc limit 1")).rows[0];
+    assert.equal(t.status, "feito", t.erro || "");
+    assert.match(JSON.stringify(corpoClaude.messages[0].content), /SEQUÊNCIA DE STORIES.{0,80}exatamente 3 slides/);
+    assert.equal(mystic.length, 3, "uma foto por story");
+    assert.ok(mystic.every(b => b.aspect_ratio === "social_story_9_16"));
+    const p = (await chamar({ acao: "pauta" }, ana)).posts.find(x => x.id === id);
+    assert.equal(JSON.parse(p.Slides).length, 3);
+    await chamar({ acao: "salvarArtes", id, artes: [1, 2, 3].map(() => ({ tipo: "image/jpeg", base64: JPG })) }, ana);
+    await db().query("update posts set status = 'Agendado' where id = $1", [id]);
+    assert.equal((await chamar({ acao: "publicarAgora", id }, ana)).status, 200);
+    for (let k = 0; k < 100; k++) { if ((await db().query("select status from posts where id = $1", [id])).rows[0].status !== "Publicando") break; await new Promise(r => setTimeout(r, 30)); }
+  } finally { globalThis.fetch = original; }
+  const fim = (await db().query("select status, links, erro from posts where id = $1", [id])).rows[0];
+  assert.equal(fim.status, "Publicado", fim.erro || "");
+  assert.equal(stories.length, 3, "três stories, um por imagem");
+  assert.ok(stories.every(s => s.mediaItems.length === 1 && s.platforms[0].platformSpecificData.contentType === "story"));
+  assert.deepEqual(Object.keys(fim.links), ["Instagram"], "sem as anotações parciais no fim");
+});

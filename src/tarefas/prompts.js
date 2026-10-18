@@ -114,13 +114,22 @@ export const idiomaDe = m => (m && m.idioma) || "Português (Brasil)";
 export function briefingTexto(b, formato) {
   if (!b || typeof b !== 'object') return '';
   const L = [];
-  const storyImagem = formato === 'Stories' && b.story === 'imagem';
+  const storyImagem = formato === 'Stories' && (b.story === 'imagem' || b.story === 'sequencia');
   const video = ['Reels', 'Stories'].includes(formato) && !storyImagem;
   if (storyImagem) {
-    L.push('- story em IMAGEM ESTÁTICA (não é vídeo): use "slides" com exatamente 1 slide e deixe "cenas" vazia');
-    L.push('- o slide tem "titulo" curto (até 8 palavras) e "texto" opcional (até 15 palavras)');
-    if (b.fundo === 'texto') L.push('- sem imagem: "usa_imagem" false e "prompts_imagem" vazio');
-    else L.push('- "usa_imagem" true e 1 prompt de imagem com "proporcao": "9:16" (vertical)');
+    if (b.story === 'sequencia') {
+      const n = b.slides && b.slides !== 'auto' ? Number(b.slides) : 0;
+      L.push('- SEQUÊNCIA DE STORIES em imagem estática (não é vídeo): use "slides" com ' + (n ? 'exatamente ' + n : 'de 3 a 6') + ' slides, um por story, e deixe "cenas" vazia');
+      L.push('- a sequência conta uma história do primeiro ao último story: abertura que prende, desenvolvimento e um último story com a chamada (ex.: responder, clicar no link, visitar)');
+      L.push('- cada slide tem "titulo" curto (até 8 palavras) e "texto" opcional (até 15 palavras); nada de "arraste para o lado", porque story passa sozinho');
+      if (b.fundo === 'texto') L.push('- sem imagem: "usa_imagem" false em todos e "prompts_imagem" vazio');
+      else L.push('- "usa_imagem" true e 1 prompt de imagem por slide com "proporcao": "9:16" (vertical), com o mesmo clima visual em toda a sequência');
+    } else {
+      L.push('- story em IMAGEM ESTÁTICA (não é vídeo): use "slides" com exatamente 1 slide e deixe "cenas" vazia');
+      L.push('- o slide tem "titulo" curto (até 8 palavras) e "texto" opcional (até 15 palavras)');
+      if (b.fundo === 'texto') L.push('- sem imagem: "usa_imagem" false e "prompts_imagem" vazio');
+      else L.push('- "usa_imagem" true e 1 prompt de imagem com "proporcao": "9:16" (vertical)');
+    }
   } else if (!video) {
     const capa = { foto: 'capa (slide 1) com foto de fundo', video: 'capa (slide 1) em vídeo: usa_video true e usa_imagem true', texto: 'capa (slide 1) só com texto, sem imagem' }[b.capa];
     if (capa && formato !== 'Estatico') L.push('- ' + capa);
