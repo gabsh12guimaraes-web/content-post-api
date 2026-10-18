@@ -1,6 +1,7 @@
 // Planos, limites de uso e assinatura pela Kiwify.
 // Os preços precisam ser iguais aos dos produtos criados na Kiwify (o cálculo está em PRECOS.md).
-// "de" é o preço antigo, mostrado riscado enquanto durar a promoção.
+// "de" é o preço do produto na Kiwify; "cupom" é o desconto (%) do cupom PLANOCICLO (ex.: ESSENCIALMENSAL),
+// que já vai no link do checkout. O preço cobrado é o "de" com o cupom, e o "de" aparece riscado.
 import crypto from "node:crypto";
 import { db } from "./db.js";
 import { ErroApi } from "./erros.js";
@@ -9,24 +10,33 @@ const env = process.env;
 
 export const PLANOS = {
   teste: { nome: "Teste grátis", posts: 3, ideias: 2, precos: null },
-  essencial: { nome: "Essencial", posts: 12, ideias: 8, de: { mensal: 369, semestral: 339, anual: 307 }, precos: { mensal: 177, semestral: 169, anual: 164 } },
-  profissional: { nome: "Profissional", posts: 30, ideias: 20, de: { mensal: 877, semestral: 807, anual: 729 }, precos: { mensal: 417, semestral: 407, anual: 399 } },
-  agencia: { nome: "Agência", posts: 80, ideias: 50, de: { mensal: 2307, semestral: 2117, anual: 1919 }, precos: { mensal: 1097, semestral: 1067, anual: 1049 } },
+  essencial: { nome: "Essencial", posts: 12, ideias: 8, de: { mensal: 369, semestral: 339, anual: 307 }, cupom: { mensal: 52, semestral: 50, anual: 46 } },
+  profissional: { nome: "Profissional", posts: 30, ideias: 20, de: { mensal: 877, semestral: 807, anual: 729 }, cupom: { mensal: 52, semestral: 49, anual: 45 } },
+  agencia: { nome: "Agência", posts: 80, ideias: 50, de: { mensal: 2307, semestral: 2117, anual: 1919 }, cupom: { mensal: 52, semestral: 49, anual: 45 } },
 };
 export const CICLOS = { mensal: 1, semestral: 6, anual: 12 };
+const centavos = v => Math.round(v * 100) / 100;
+// Valor cobrado por ciclo (total) e por mês, já com o cupom.
+for (const p of Object.values(PLANOS)) if (p.de) p.precos = Object.fromEntries(Object.keys(CICLOS).map(c => [c, centavos(p.de[c] * CICLOS[c] * (100 - (p.cupom[c] || 0)) / 100 / CICLOS[c])]));
+export const totalDo = (p, c) => centavos(p.de[c] * CICLOS[c] * (100 - (p.cupom[c] || 0)) / 100);
+export const codigoCupom = (id, c) => (id + c).toUpperCase();
 
 // Cobrança ligada só quando COBRANCA=sim (até lá ninguém é bloqueado por limite).
 export const cobrancaLigada = () => env.COBRANCA === "sim";
 const lerJson = nome => { try { return JSON.parse(env[nome] || "{}"); } catch (e) { return {}; } };
 const isentos = () => (env.EMAILS_ISENTOS || "").split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
 
-// Links de checkout da Kiwify: KIWIFY_CHECKOUT = {"essencial:mensal": "https://pay.kiwify.com.br/...", ...}
+// Links de checkout da Kiwify: KIWIFY_CHECKOUT = {"essencial:mensal": "https://pay.kiwify.com.br/...", ...}. O cupom entra no link (?coupon=).
+const comCupom = (u, codigo) => { if (!u) return null; try { const x = new URL(u); if (codigo) x.searchParams.set("coupon", codigo); return x.toString(); } catch (e) { return null; } };
 export function catalogo() {
   const links = lerJson("KIWIFY_CHECKOUT");
   return {
     planos: Object.entries(PLANOS).filter(([, p]) => p.precos).map(([id, p]) => ({
       id, nome: p.nome, posts: p.posts, ideias: p.ideias,
-      ciclos: Object.entries(p.precos).map(([ciclo, porMes]) => ({ ciclo, meses: CICLOS[ciclo], porMes, dePorMes: p.de?.[ciclo] || null, total: porMes * CICLOS[ciclo], checkout: links[`${id}:${ciclo}`] || null })),
+      ciclos: Object.entries(p.precos).map(([ciclo, porMes]) => {
+        const cupom = p.cupom[ciclo] ? codigoCupom(id, ciclo) : null;
+        return { ciclo, meses: CICLOS[ciclo], porMes, dePorMes: p.de[ciclo], desconto: p.cupom[ciclo] || 0, cupom, total: totalDo(p, ciclo), checkout: comCupom(links[`${id}:${ciclo}`], cupom) };
+      }),
     })),
     afiliados: env.KIWIFY_AFILIADOS || null,
     teste: { posts: PLANOS.teste.posts, dias: 7 },
