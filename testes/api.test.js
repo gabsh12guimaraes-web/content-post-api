@@ -793,3 +793,12 @@ test("relatório da planilha: protegido por chave, com uma linha por pessoa e o 
     assert.ok(linhas.some(l => l.includes("sem organização")));
   } finally { delete process.env.RELATORIO_CHAVE; }
 });
+
+test("relatório no formato da planilha em português: decimais com vírgula", async () => {
+  process.env.RELATORIO_CHAVE = "c".repeat(40);
+  try {
+    const r = await app.inject({ method: "GET", url: "/relatorio.csv?formato=br&chave=" + "c".repeat(40) });
+    const ana = r.body.split("\n").find(l => l.includes("ana@exemplo.com"));
+    assert.match(ana, /,"7,28",/);
+  } finally { delete process.env.RELATORIO_CHAVE; }
+});

@@ -66,7 +66,7 @@ export async function criarApp() {
     if (!process.env.RELATORIO_CHAVE) return rep.code(404).send("não encontrado");
     try { limitar(req.ip, "relatorio"); } catch (e) { return rep.code(429).send("muitas tentativas"); }
     if (!chaveRelatorioOk(req.query.chave)) return rep.code(401).send("chave inválida");
-    return rep.header("content-type", "text/csv; charset=utf-8").header("cache-control", "no-store").send(await relatorioCsv());
+    return rep.header("content-type", "text/csv; charset=utf-8").header("cache-control", "no-store").send(await relatorioCsv({ br: req.query.formato === "br" }));
   });
 
   // Avisos da Kiwify (compra aprovada, renovação, cancelamento, estorno).

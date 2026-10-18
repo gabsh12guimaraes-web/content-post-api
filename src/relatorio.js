@@ -1,5 +1,6 @@
 // Relatório de controle (planilha do Google): uma linha por pessoa em cada organização, com plano, uso e consumo de IA.
-// A planilha puxa com =IMPORTDATA("https://.../relatorio.csv?chave=...", ",", "en_US"); sem RELATORIO_CHAVE, a rota não existe.
+// A planilha puxa com =IMPORTDATA("https://.../relatorio.csv?chave=...&formato=br"); sem RELATORIO_CHAVE, a rota não existe.
+// formato=br: decimais com vírgula, para a planilha em português ler os valores como número.
 import crypto from "node:crypto";
 import { db } from "./db.js";
 import { PLANOS, totalDo, CICLOS, isentos } from "./planos.js";
@@ -87,9 +88,10 @@ const celula = v => {
   if (/^[=+\-@\t\r]/.test(t) && !/^-?\d+(\.\d+)?$/.test(t)) t = "'" + t;
   return /[",\n\r]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
 };
-export async function relatorioCsv() {
+export async function relatorioCsv({ br = false } = {}) {
   const linhas = await linhasRelatorio();
-  return [COLUNAS.map(c => c[1]), ...linhas.map(l => COLUNAS.map(c => l[c[0]]))].map(l => l.map(celula).join(",")).join("\n") + "\n";
+  const valor = v => (br && typeof v === "string" && /^\d+\.\d+$/.test(v) ? v.replace(".", ",") : v);
+  return [COLUNAS.map(c => c[1]), ...linhas.map(l => COLUNAS.map(c => valor(l[c[0]])))].map(l => l.map(celula).join(",")).join("\n") + "\n";
 }
 
 export function chaveRelatorioOk(chave) {
