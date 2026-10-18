@@ -113,6 +113,26 @@ registrar("descreverImagem", async (org, { imagem }) => {
 });
 
 /* ================= 2. Mídias do post: fotos (Mystic) e clipes (Kling 3) ================= */
+// Limite do que a IA guarda no banco; acima disso saem as mais antigas que nenhum post usa.
+export const LIMITE_BANCO_IA = { imagem: 500, video: 80 };
+// Cada foto ou clipe gerado também vai para o banco da marca, para reutilizar depois (sem gastar créditos).
+export async function guardarNoBanco(org, arquivo, { nome, descricao, video, post }) {
+  try {
+    await db().query("insert into banco_imagens (org_id, arquivo_id, nome, descricao, tags, origem, post_id) values ($1, $2, $3, $4, $5, 'ia', $6)",
+      [org, arquivo, String(nome || "").slice(0, 80), String(descricao || "").slice(0, 400), ["gerada por IA", video ? "vídeo" : "foto"], post || null]);
+    const tipo = video ? "video/%" : "image/%", limite = video ? LIMITE_BANCO_IA.video : LIMITE_BANCO_IA.imagem;
+    const { rows } = await db().query(`delete from banco_imagens where id in (
+        select b.id from banco_imagens b join arquivos a on a.id = b.arquivo_id
+        where b.org_id = $1 and b.origem = 'ia' and a.tipo like $2
+          and not exists (select 1 from posts p where p.org_id = $1 and (
+            exists (select 1 from jsonb_each_text(p.fotos) f where f.value = b.arquivo_id::text) or
+            exists (select 1 from jsonb_each_text(p.clipes) c where c.value = b.arquivo_id::text)))
+        order by b.criado_em desc offset $3)
+      returning arquivo_id`, [org, tipo, limite]);
+    if (rows.length) await apagarArquivos(org, rows.map(r => r.arquivo_id));
+  } catch (e) { console.error("[banco]", e.message); }
+}
+const nomeNoBanco = (post, n) => (String(post.titulo || "Post").slice(0, 64) + " · " + n).slice(0, 80);
 async function gerarMidias(org, post, c, regerar) {
   const video = ehVideo(post.formato, post);
   const fotos = { ...(post.fotos || {}) }, clipes = { ...(post.clipes || {}) };
@@ -129,6 +149,7 @@ async function gerarMidias(org, post, c, regerar) {
       try {
         const url = await gerarFoto(org, x.prompt, x.proporcao);
         const id = await guardarDeUrl(org, url, `foto-${n}`);
+        await guardarNoBanco(org, id, { nome: nomeNoBanco(post, n), descricao: x.prompt, post: post.id });
         if (fotos[n]) velhos.push(fotos[n]);
         fotos[n] = id;
       } catch (e) { falhou("foto", e); }
@@ -145,6 +166,7 @@ async function gerarMidias(org, post, c, regerar) {
     try {
       const url = await gerarClipe(org, p);
       const id = await guardarDeUrl(org, url, `clipe-${p.n}.mp4`);
+      await guardarNoBanco(org, id, { nome: nomeNoBanco(post, p.n), descricao: p.prompt, video: true, post: post.id });
       if (clipes[p.n]) velhos.push(clipes[p.n]);
       clipes[p.n] = id;
     } catch (e) { falhou("clipe", e); }
@@ -174,22 +196,28 @@ async function bancoParaPost(org, briefing) {
   if (!["banco", "misto"].includes(modo)) return { texto: "", mapa: {} };
   const escolhidas = Array.isArray(briefing.banco) ? briefing.banco.filter(x => /^[0-9a-f-]{36}$/i.test(String(x))) : [];
   const { rows } = escolhidas.length
-    ? await db().query("select * from banco_imagens where org_id = $1 and id = any($2::uuid[]) order by criado_em desc", [org, escolhidas])
-    : await db().query("select * from banco_imagens where org_id = $1 order by criado_em desc limit 40", [org]);
+    ? await db().query("select b.*, a.tipo from banco_imagens b join arquivos a on a.id = b.arquivo_id where b.org_id = $1 and b.id = any($2::uuid[]) order by b.criado_em desc", [org, escolhidas])
+    : await db().query("select b.*, a.tipo from banco_imagens b join arquivos a on a.id = b.arquivo_id where b.org_id = $1 order by (b.origem = 'envio') desc, b.criado_em desc limit 40", [org]);
   if (!rows.length) return { texto: "", mapa: {}, vazio: true };
-  const mapa = {};
-  const linhas = rows.map((r, i) => { const cod = "b" + (i + 1); mapa[cod] = r.arquivo_id; return `${cod}: ${[r.nome, r.descricao, (r.tags || []).join(", ")].filter(Boolean).join(" · ") || "foto sem descrição"}`; });
+  const mapa = {}; let nf = 0, nv = 0;
+  const linhas = rows.map(r => {
+    const video = /^video\//.test(r.tipo), cod = video ? "v" + (++nv) : "b" + (++nf);
+    mapa[cod] = { arquivo: r.arquivo_id, video };
+    return `${cod}${video ? " [vídeo]" : ""}: ${[r.nome, r.descricao, (r.tags || []).join(", ")].filter(Boolean).join(" · ") || (video ? "vídeo sem descrição" : "foto sem descrição")}`;
+  });
   return { texto: ["<banco_de_imagens>", ...linhas, "</banco_de_imagens>"].join("\n"), mapa };
 }
-// Troca o código do banco (b3) pelo arquivo, nos slides ou cenas, e devolve as fotos já resolvidas.
-function aplicarBanco(c, mapa) {
-  const fotos = {};
+// Troca o código do banco (b3 foto, v2 vídeo) pelo arquivo, nos slides ou cenas, e devolve fotos e clipes já resolvidos.
+export function aplicarBanco(c, mapa) {
+  const fotos = {}, clipes = {};
   for (const lista of [c.slides || [], c.cenas || []]) lista.forEach((s, i) => {
-    const arq = s && mapa[String(s.imagem_banco || "").trim()];
-    if (arq) { const n = Number(s.n) || i + 1; fotos[n] = arq; s.usa_imagem = true; }
+    const x = s && mapa[String(s.imagem_banco || "").trim()];
+    if (!x) return;
+    const n = Number(s.n) || i + 1;
+    if (x.video) { clipes[n] = x.arquivo; s.usa_video = true; } else { fotos[n] = x.arquivo; s.usa_imagem = true; }
   });
-  if (Object.keys(fotos).length) c.prompts_imagem = (c.prompts_imagem || []).filter(p => !fotos[Number(p.slide)]);
-  return fotos;
+  if (Object.keys(fotos).length || Object.keys(clipes).length) c.prompts_imagem = (c.prompts_imagem || []).filter(p => !fotos[Number(p.slide)] && !clipes[Number(p.slide)]);
+  return { fotos, clipes };
 }
 registrar("criar", Object.assign(async (org, { post: id }) => {
   const post = await postDe(org, id);
@@ -210,7 +238,7 @@ registrar("criar", Object.assign(async (org, { post: id }) => {
   // Começa do zero: apaga mídias de uma criação anterior.
   await apagarArquivos(org, [...Object.values(post.fotos || {}), ...Object.values(post.clipes || {}), ...(post.artes || [])]);
   const doBanco = aplicarBanco(c, banco.mapa);
-  const r = await gerarMidias(org, { ...post, fotos: doBanco, clipes: {} }, c, null);
+  const r = await gerarMidias(org, { ...post, fotos: doBanco.fotos, clipes: doBanco.clipes }, c, null);
   await db().query("update posts set fotos = $2, clipes = $3, artes = '{}', artes_prontas = false, regerar = '{}', status = 'EmRevisao', erro = $4, atualizado_em = now() where id = $1",
     [post.id, JSON.stringify(r.fotos), JSON.stringify(r.clipes), avisoFalhas(r.falhas, r.semCredito)]);
   return { fotos: Object.keys(r.fotos).length, clipes: Object.keys(r.clipes).length, falhas: r.falhas };

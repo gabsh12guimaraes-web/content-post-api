@@ -175,6 +175,12 @@ test("criar post: Claude escreve, Magnific gera foto, post vai para revisão", a
   assert.ok(textoFinal.includes("exatamente 7 slides"));
   assert.equal(conteudo.find(b => b.type === "image").source.type, "base64");
   assert.equal(JSON.parse(p.Briefing).hack, undefined);
+  // A foto gerada também fica no banco de imagens, para reutilizar sem gastar créditos.
+  const banco = (await chamar({ acao: "listarBanco" }, ana)).imagens;
+  const gerada = banco.find(x => x.origem === "ia" && x.post === id);
+  assert.ok(gerada, "foto gerada vai para o banco");
+  assert.ok(JSON.parse(p.ImagensSlides)["1"].includes(gerada.arquivo.id));
+  assert.equal(gerada.descricao, "a photo");
 });
 
 test("importar do Airtable traz marca, fontes, ideias e calendário sem guardar o token", async () => {
@@ -592,4 +598,56 @@ test("sem crédito no Magnific: para de pedir e avisa com clareza", async () => 
   assert.equal(p.status, "EmRevisao");
   assert.match(p.erro, /sem créditos: 3 imagem/);
   assert.equal(pedidosMystic, 1, "não insiste depois do primeiro 'sem crédito'");
+});
+
+test("banco guarda o que a IA gera, reaproveita vídeo do banco e descarta o excesso antigo", async () => {
+  const mod = await import("../src/tarefas/trabalhos.js");
+  const MP4 = Buffer.from("000000186674797069736f6d0000020069736f6d69736f32", "hex").toString("base64");
+  const vid = await chamar({ acao: "enviarImagemBanco", tipo: "video/mp4", nome: "loja.mp4", base64: MP4, titulo: "Fachada da loja" }, ana);
+  assert.equal(vid.status, 200);
+  assert.equal((await db().query("select count(*)::int as n from tarefas where tipo = 'descreverImagem' and payload->>'imagem' = $1", [vid.id])).rows[0].n, 0, "vídeo não vai para o Claude descrever");
+  const item = (await chamar({ acao: "listarBanco" }, ana)).imagens.find(x => x.id === vid.id);
+  assert.equal(item.arquivo.type, "video/mp4");
+  assert.equal(item.origem, "envio");
+
+  const i = (await db().query("insert into ideias (org_id, titulo, formato, rede, score) values ($1, 'Reels da loja', 'Reels', 'Instagram', 7) returning id", [anaOrg])).rows[0].id;
+  const { id } = await chamar({ acao: "agendarIdeia", id: i, data: new Date(Date.now() + 7 * 86400000).toISOString() }, ana);
+  const original = globalThis.fetch, pedidos = []; let corpo = null;
+  globalThis.fetch = async (url, op = {}) => {
+    pedidos.push(String(url));
+    const json = o => new Response(JSON.stringify(o), { headers: { "content-type": "application/json" } });
+    if (String(url).includes("anthropic.com")) { corpo = JSON.parse(op.body); return json({ content: [{ type: "text", text: JSON.stringify({ legenda: "L", hashtags: [], slides: [], prompts_imagem: [{ slide: 1, prompt: "não gera", proporcao: "9:16" }],
+      cenas: [{ n: 1, duracao_s: 5, visual: "fachada", prompt_video: "zoom lento", imagem_banco: "v1" }] }) }], stop_reason: "end_turn" }); }
+    return original(url, op);
+  };
+  try {
+    assert.equal((await chamar({ acao: "criarPost", id, briefing: { imagens: "banco", banco: [vid.id] } }, ana)).status, 200);
+    await puxar();
+    for (let k = 0; k < 100; k++) { const st = (await db().query("select status from tarefas where tipo = 'criar' order by criado_em desc limit 1")).rows[0].status; if (st === "feito" || st === "erro") break; await new Promise(r => setTimeout(r, 50)); }
+  } finally { globalThis.fetch = original; }
+  const t = (await db().query("select status, erro from tarefas where tipo = 'criar' order by criado_em desc limit 1")).rows[0];
+  assert.equal(t.status, "feito", t.erro || "");
+  assert.ok(JSON.stringify(corpo.messages[0].content).includes("v1 [vídeo]: Fachada da loja"));
+  assert.ok(!pedidos.some(u => u.includes("freepik.com")), "não gasta crédito do Magnific");
+  const post = (await db().query("select fotos, clipes from posts where id = $1", [id])).rows[0];
+  assert.equal(post.clipes["1"], item.arquivo.id);
+  assert.deepEqual(post.fotos, {});
+
+  // Acima do limite, saem as gerações mais antigas que nenhum post usa (as enviadas pela pessoa ficam).
+  const { salvarArquivo } = await import("../src/arquivos.js");
+  const antes = mod.LIMITE_BANCO_IA.imagem; mod.LIMITE_BANCO_IA.imagem = 1;
+  try {
+    const usadas = (await db().query("select b.arquivo_id from banco_imagens b where b.org_id = $1 and b.origem = 'ia' and exists (select 1 from posts p, jsonb_each_text(p.fotos) f where p.org_id = $1 and f.value = b.arquivo_id::text)", [anaOrg])).rows.map(r => r.arquivo_id);
+    assert.ok(usadas.length, "há foto gerada em uso");
+    const a1 = await salvarArquivo(anaOrg, { tipo: "image/jpeg", nome: "x1", dados: Buffer.from(JPG, "base64") });
+    await mod.guardarNoBanco(anaOrg, a1, { nome: "um", descricao: "p1" });
+    await new Promise(r => setTimeout(r, 5));
+    const a2 = await salvarArquivo(anaOrg, { tipo: "image/jpeg", nome: "x2", dados: Buffer.from(JPG, "base64") });
+    await mod.guardarNoBanco(anaOrg, a2, { nome: "dois", descricao: "p2" });
+    const ia = (await db().query("select arquivo_id from banco_imagens where org_id = $1 and origem = 'ia'", [anaOrg])).rows.map(r => r.arquivo_id);
+    assert.ok(ia.includes(a2) && !ia.includes(a1), "a mais antiga sem uso saiu");
+    for (const u of usadas) assert.ok(ia.includes(u), "a que um post usa fica");
+    assert.equal((await db().query("select count(*)::int as n from arquivos where id = $1", [a1])).rows[0].n, 0, "arquivo descartado some do disco");
+    assert.ok((await chamar({ acao: "listarBanco" }, ana)).imagens.some(x => x.id === vid.id), "enviados pela pessoa ficam");
+  } finally { mod.LIMITE_BANCO_IA.imagem = antes; }
 });

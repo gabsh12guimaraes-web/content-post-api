@@ -87,17 +87,18 @@ export const acoesPauta = {
     const { rows } = await db().query("select * from banco_imagens where org_id = $1 order by criado_em desc", [ctx.org]);
     const a = await anexos(ctx.org, rows.map(r => r.arquivo_id));
     const tarefas = (await db().query("select payload->>'imagem' as id from tarefas where org_id = $1 and tipo = 'descreverImagem' and status in ('pendente', 'rodando')", [ctx.org])).rows.map(r => r.id);
-    return { imagens: rows.map(r => ({ id: r.id, nome: r.nome, descricao: r.descricao, tags: r.tags || [], arquivo: a.get(r.arquivo_id) || null, descrevendo: tarefas.includes(r.id) })).filter(x => x.arquivo) };
+    return { imagens: rows.map(r => ({ id: r.id, nome: r.nome, descricao: r.descricao, tags: r.tags || [], origem: r.origem || "envio", post: r.post_id || null, arquivo: a.get(r.arquivo_id) || null, descrevendo: tarefas.includes(r.id) })).filter(x => x.arquivo) };
   },
   async enviarImagemBanco(ctx, b) {
-    if (!["image/png", "image/jpeg", "image/webp"].includes(b.tipo)) falha("Envie fotos em JPG, PNG ou WEBP.");
-    const total = (await db().query("select count(*)::int as n from banco_imagens where org_id = $1", [ctx.org])).rows[0].n;
-    if (total >= 300) falha("O banco de imagens aceita até 300 fotos. Remova algumas para enviar novas.");
-    const arquivo = await salvarArquivo(ctx.org, { tipo: b.tipo, nome: b.nome, dados: doBase64(b.base64, 8 * 1024 * 1024) });
+    if (!["image/png", "image/jpeg", "image/webp", "video/mp4"].includes(b.tipo)) falha("Envie fotos em JPG, PNG ou WEBP, ou vídeos em MP4.");
+    const total = (await db().query("select count(*)::int as n from banco_imagens where org_id = $1 and origem = 'envio'", [ctx.org])).rows[0].n;
+    if (total >= 300) falha("O banco aceita até 300 arquivos enviados. Remova alguns para enviar novos.");
+    const video = b.tipo === "video/mp4";
+    const arquivo = await salvarArquivo(ctx.org, { tipo: b.tipo, nome: b.nome, dados: doBase64(b.base64, (video ? 25 : 8) * 1024 * 1024) });
     const nome = texto(b.titulo, 80);
     const { rows } = await db().query("insert into banco_imagens (org_id, arquivo_id, nome) values ($1, $2, $3) returning id", [ctx.org, arquivo, nome]);
     // A IA descreve a foto em segundo plano (nome, descrição e etiquetas). Se não houver chave do Claude, fica para a pessoa preencher.
-    if (b.descrever !== false) await enfileirar(ctx.org, "descreverImagem", { imagem: rows[0].id }, ctx.usuario.id);
+    if (b.descrever !== false && !video) await enfileirar(ctx.org, "descreverImagem", { imagem: rows[0].id }, ctx.usuario.id);
     return { id: rows[0].id };
   },
   async salvarImagemBanco(ctx, b) {
@@ -112,7 +113,7 @@ export const acoesPauta = {
     const r = (await db().query("delete from banco_imagens where id = $1 and org_id = $2 returning arquivo_id", [id, ctx.org])).rows[0];
     if (!r) falha("Foto não encontrada.", 404);
     // O arquivo só some se nenhum post estiver usando a foto.
-    const emUso = (await db().query("select 1 from posts where org_id = $1 and exists (select 1 from jsonb_each_text(fotos) f where f.value = $2::text) limit 1", [ctx.org, r.arquivo_id])).rows.length;
+    const emUso = (await db().query("select 1 from posts where org_id = $1 and (exists (select 1 from jsonb_each_text(fotos) f where f.value = $2::text) or exists (select 1 from jsonb_each_text(clipes) c where c.value = $2::text)) limit 1", [ctx.org, r.arquivo_id])).rows.length;
     if (!emUso) await apagarArquivos(ctx.org, [r.arquivo_id]);
     return {};
   },
@@ -121,15 +122,16 @@ export const acoesPauta = {
     const p = await postDaOrg(ctx.org, b.id);
     if (["Publicando", "Publicado"].includes(p.status)) falha("Este post já foi publicado.");
     const n = parseInt(b.slide, 10); if (!(n >= 1 && n <= 20)) falha("Slide inválido.");
-    const img = (await db().query("select arquivo_id from banco_imagens where id = $1 and org_id = $2", [exigirId(b.imagem), ctx.org])).rows[0];
+    const img = (await db().query("select b.arquivo_id, a.tipo from banco_imagens b join arquivos a on a.id = b.arquivo_id where b.id = $1 and b.org_id = $2", [exigirId(b.imagem), ctx.org])).rows[0];
     if (!img) falha("Foto não encontrada no banco.", 404);
-    const fotos = { ...(p.fotos || {}) }, antiga = fotos[n];
-    fotos[n] = img.arquivo_id;
-    const marcar = lista => (Array.isArray(lista) ? lista : []).map((s, i) => ((Number(s.n) || i + 1) === n ? { ...s, usa_imagem: true } : s));
+    const video = /^video\//.test(img.tipo);
+    const fotos = { ...(p.fotos || {}) }, clipes = { ...(p.clipes || {}) }, mapa = video ? clipes : fotos, antiga = mapa[n];
+    mapa[n] = img.arquivo_id;
+    const marcar = lista => (Array.isArray(lista) ? lista : []).map((s, i) => ((Number(s.n) || i + 1) === n ? { ...s, ...(video ? { usa_video: true } : { usa_imagem: true }) } : s));
     const conteudo = { ...(p.conteudo || {}) };
-    if (Array.isArray(conteudo.slides)) conteudo.slides = marcar(conteudo.slides);
-    await db().query("update posts set fotos = $2, slides = $3, conteudo = $4, artes_prontas = false, atualizado_em = now() where id = $1",
-      [p.id, JSON.stringify(fotos), JSON.stringify(marcar(p.slides)), JSON.stringify(conteudo)]);
+    for (const k of ["slides", "cenas"]) if (Array.isArray(conteudo[k])) conteudo[k] = marcar(conteudo[k]);
+    await db().query("update posts set fotos = $2, clipes = $3, slides = $4, conteudo = $5, artes_prontas = false, atualizado_em = now() where id = $1",
+      [p.id, JSON.stringify(fotos), JSON.stringify(clipes), JSON.stringify(marcar(p.slides)), JSON.stringify(conteudo)]);
     if (antiga && antiga !== img.arquivo_id) await apagarArquivos(ctx.org, [antiga]);
     return {};
   },

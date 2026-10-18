@@ -44,7 +44,7 @@ Regras de imagem e vídeo (o Magnific gera; o texto e o logo entram depois, pela
 - Se a mensagem trouxer imagens de mood board da marca, use-as como referência de estilo (paleta, luz, textura, enquadramento, clima) nos prompts de imagem e de vídeo. Não copie objetos, pessoas ou textos delas.
 
 Banco de imagens:
-- Se a mensagem trouxer <banco_de_imagens>, são fotos reais da marca (produtos, loja, equipe), cada uma com um código (b1, b2...) e uma descrição.
+- Se a mensagem trouxer <banco_de_imagens>, são fotos da marca (produtos, loja, equipe) e imagens que a IA já gerou antes, cada uma com um código (b1, b2...) e uma descrição. Códigos v1, v2... marcados [vídeo] são clipes de vídeo prontos: em Reels, Stories em vídeo ou slide com vídeo, use "imagem_banco": "v2" para reaproveitar o clipe (sem gerar prompt de imagem nem de vídeo para ele).
 - Para usar uma foto do banco num slide, coloque "imagem_banco": "b3" no slide (ou na cena, em Reels e Stories) e NÃO gere prompt de imagem para esse slide.
 - Escolha a foto que combina com o texto do slide. Não repita a mesma foto em slides seguidos, a não ser que o banco tenha poucas fotos.
 - Escreva o texto em cima do que a foto mostra de verdade (cor, modelo, tipo do produto). Não invente características que a descrição não traz.
