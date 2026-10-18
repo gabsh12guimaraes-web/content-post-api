@@ -671,3 +671,30 @@ test("migração leva ao banco as fotos e clipes de posts criados antes, sem dup
   assert.deepEqual(rows.map(r => [r.nome, r.descricao, r.origem]), [["Post antigo · 1", "uma foto antiga", "ia"], ["Post antigo · 2", "zoom antigo", "ia"]]);
   assert.equal((await db().query("select count(*)::int as n from banco_imagens b where (select count(*) from banco_imagens c where c.arquivo_id = b.arquivo_id) > 1")).rows[0].n, 0, "nada duplicado no banco");
 });
+
+test("IA escolhe no banco as fotos que combinam com o post", async () => {
+  const i = (await db().query("insert into ideias (org_id, titulo, formato, rede, score) values ($1, 'Pulseira nova', 'Carrossel', 'Instagram', 8) returning id", [anaOrg])).rows[0].id;
+  const { id } = await chamar({ acao: "agendarIdeia", id: i, data: new Date(Date.now() + 4 * 86400000).toISOString() }, ana);
+  const azul = (await chamar({ acao: "enviarImagemBanco", tipo: "image/jpeg", nome: "a.jpg", titulo: "Pulseira azul", base64: JPG, descrever: false }, ana)).id;
+  await chamar({ acao: "enviarImagemBanco", tipo: "image/jpeg", nome: "b.jpg", titulo: "Fachada da loja", base64: JPG, descrever: false }, ana);
+  const original = globalThis.fetch;
+  let corpo = null;
+  globalThis.fetch = async (url, op = {}) => {
+    if (String(url).includes("anthropic.com")) {
+      corpo = JSON.parse(op.body);
+      const cod = corpo.messages[0].content.split("\n").find(l => l.includes("Pulseira azul")).split(":")[0];
+      return new Response(JSON.stringify({ content: [{ type: "text", text: JSON.stringify({ escolhidas: [cod, "b999"], motivo: "mostra o produto" }) }], stop_reason: "end_turn" }), { headers: { "content-type": "application/json" } });
+    }
+    return original(url, op);
+  };
+  let r;
+  try { r = await chamar({ acao: "escolherBanco", id, briefing: { imagens: "banco", slides: "5" } }, ana); }
+  finally { globalThis.fetch = original; }
+  assert.equal(r.status, 200, r.erro);
+  assert.deepEqual(r.ids, [azul], "só os códigos que existem no banco");
+  assert.equal(r.motivo, "mostra o produto");
+  assert.match(corpo.system, /até 5 itens/);
+  assert.ok(corpo.messages[0].content.includes("Pulseira nova"));
+  const p = (await chamar({ acao: "pauta" }, ana)).posts.find(x => x.id === id);
+  assert.equal(p.Status, "Planejado", "não cria o post nem gasta o limite");
+});

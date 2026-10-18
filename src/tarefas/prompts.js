@@ -71,6 +71,16 @@ Regras:
 Responda APENAS com um objeto JSON com os mesmos campos da versão atual (legenda, hashtags, slides, cenas, prompts_imagem) mais:
 "alterou_legenda": true|false, "alterou_slides": [números], "alterou_imagens": [números], "resumo_mudancas": "frase curta dizendo o que mudou"`;
 
+export const SISTEMA_ESCOLHA_BANCO = `Você é diretor(a) de arte da marca descrita em <marca>. Escolha, no <banco_de_imagens>, as fotos e vídeos que combinam com o post descrito em <post>, <ideia> e <briefing>.
+
+- Cada item tem um código (b1, b2... fotos; v1, v2... marcados [vídeo]) e uma descrição. Escolha só pelo que a descrição diz que aparece; não suponha o que não está escrito.
+- Prefira o que mostra o assunto do post (o produto, o serviço, o lugar ou o tema citado). Depois, o que combina com o clima e o objetivo.
+- Escolha de 1 até {{maximo}} itens, os melhores primeiro. Melhor poucos certos do que muitos que não têm a ver.
+- Só inclua vídeos se o post for Reels, Stories em vídeo ou se o briefing pedir slides em vídeo. Em post só com fotos, escolha só fotos.
+- Se nada do banco combinar, devolva a lista vazia.
+
+Responda APENAS com JSON: {"escolhidas":["b3","b1"],"motivo":"uma frase curta, em português, dizendo por que escolheu"}`;
+
 export const idiomaDe = m => (m && m.idioma) || "Português (Brasil)";
 
 // Texto do briefing para o Claude (o mesmo do fluxo 03 do n8n).

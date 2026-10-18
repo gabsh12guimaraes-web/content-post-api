@@ -3,7 +3,7 @@ import { db } from "../db.js";
 import { claude, gerarFoto, gerarClipe, coletarApify, publicarZernio, chaveDe, ErroIntegracao } from "../provedores/index.js";
 import { guardarDeUrl, apagarArquivos, anexos } from "../arquivos.js";
 import { registrar } from "./fila.js";
-import { SISTEMA_IDEIAS, SISTEMA_POST, SISTEMA_AJUSTE, idiomaDe, briefingTexto } from "./prompts.js";
+import { SISTEMA_IDEIAS, SISTEMA_POST, SISTEMA_AJUSTE, SISTEMA_ESCOLHA_BANCO, idiomaDe, briefingTexto } from "./prompts.js";
 import { devolver } from "../planos.js";
 import { lerArquivo } from "../arquivos.js";
 
@@ -206,6 +206,25 @@ async function bancoParaPost(org, briefing) {
     return `${cod}${video ? " [vídeo]" : ""}: ${[r.nome, r.descricao, (r.tags || []).join(", ")].filter(Boolean).join(" · ") || (video ? "vídeo sem descrição" : "foto sem descrição")}`;
   });
   return { texto: ["<banco_de_imagens>", ...linhas, "</banco_de_imagens>"].join("\n"), mapa };
+}
+// A IA escolhe, no banco, as fotos e vídeos que combinam com o post (botão "IA escolhe" no briefing). Devolve os ids do banco, os melhores primeiro.
+export async function escolherDoBanco(org, post, briefing) {
+  const { rows } = await db().query("select b.*, a.tipo from banco_imagens b join arquivos a on a.id = b.arquivo_id where b.org_id = $1 order by (b.origem = 'envio') desc, b.criado_em desc limit 200", [org]);
+  if (!rows.length) return { ids: [], motivo: "" };
+  const ids = {}; let nf = 0, nv = 0;
+  const linhas = rows.map(r => {
+    const video = /^video\//.test(r.tipo), cod = video ? "v" + (++nv) : "b" + (++nf);
+    ids[cod] = r.id;
+    return `${cod}${video ? " [vídeo]" : ""}: ${[r.nome, r.descricao, (r.tags || []).join(", ")].filter(Boolean).join(" · ") || "sem descrição"}`;
+  });
+  const m = await marcaDe(org);
+  const ideia = post.ideia_id ? (await db().query("select resumo from ideias where id = $1", [post.ideia_id])).rows[0] : null;
+  const slides = ehVideo(post.formato, { ...post, briefing }) ? Number(briefing.cenas) || 6 : post.formato === "Estatico" || ehStoryImagem({ ...post, briefing }) ? 2 : Number(briefing.slides) || 8;
+  const user = [blocoMarca(m), "", "<post>", "titulo: " + post.titulo, "formato: " + (post.formato || ""), "pilar: " + (post.pilar || ""), "</post>", "",
+    "<ideia>" + ((ideia && ideia.resumo) || post.titulo) + "</ideia>", "", briefingTexto(briefing, post.formato), "", "<banco_de_imagens>", ...linhas, "</banco_de_imagens>"].join("\n");
+  const c = await claude(org, { system: SISTEMA_ESCOLHA_BANCO.replace("{{maximo}}", String(Math.min(20, slides))), content: user, effort: "low", max_tokens: 2000 });
+  const escolhidas = [...new Set((Array.isArray(c.escolhidas) ? c.escolhidas : []).map(x => ids[String(x).trim()]).filter(Boolean))].slice(0, 20);
+  return { ids: escolhidas, motivo: String(c.motivo || "").slice(0, 300) };
 }
 // Troca o código do banco (b3 foto, v2 vídeo) pelo arquivo, nos slides ou cenas, e devolve fotos e clipes já resolvidos.
 export function aplicarBanco(c, mapa) {
