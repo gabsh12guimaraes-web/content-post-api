@@ -749,3 +749,13 @@ test("pessoa real: exige autorização, vai como referência no Seedream e só n
   assert.equal((await chamar({ acao: "removerPessoa", id: pessoa }, ana)).status, 200);
   assert.equal((await chamar({ acao: "listarPessoas" }, ana)).pessoas.length, 0);
 });
+
+test("tamanho do texto por slide fica na diagramação, só com valores válidos", async () => {
+  const p = (await chamar({ acao: "pauta" }, ana)).posts.find(x => x.Status === "EmRevisao");
+  assert.ok(p, "post em revisão");
+  const r = await chamar({ acao: "salvarDiagramacao", id: p.id, diagramacao: { modelo: "impacto", escalas: { 1: 1.3, 2: 1, 3: 5, 4: 0.6, x: 1.2 } } }, ana);
+  assert.equal(r.status, 200);
+  const d = JSON.parse((await chamar({ acao: "pauta" }, ana)).posts.find(x => x.id === p.id).Diagramacao);
+  assert.deepEqual(d.escalas, { 1: 1.3, 4: 0.6 });
+  assert.equal(d.modelo, "impacto");
+});

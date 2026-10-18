@@ -291,6 +291,13 @@ export const acoesPauta = {
       logo: um(d.logo, ["auto", "light", "dark", "simLight", "simDark", "nenhum"]),
       logoPos: um(d.logoPos, ["te", "tc", "td", "be", "bc", "bd"]),
     };
+    // Tamanho do texto por slide ou cena (A− / A+): de 0,6 a 1,6; o 1 (tamanho do modelo) não precisa ser guardado.
+    const escalas = {};
+    for (const [n, v] of Object.entries(d.escalas && typeof d.escalas === "object" ? d.escalas : {})) {
+      const k = parseInt(n, 10), x = Math.round(Number(v) * 10) / 10;
+      if (k >= 1 && k <= 20 && x >= 0.6 && x <= 1.6 && x !== 1) escalas[k] = x;
+    }
+    if (Object.keys(escalas).length) diag.escalas = escalas;
     await db().query("update posts set diagramacao = $2, artes_prontas = case when $3 then false else artes_prontas end, atualizado_em = now() where id = $1", [p.id, JSON.stringify(diag), !!b.refazer]);
     return {};
   },
