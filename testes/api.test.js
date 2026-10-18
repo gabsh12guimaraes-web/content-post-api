@@ -844,3 +844,43 @@ test("imagens: original comprimida, prévia leve em WebP e PNG com transparênci
   const marca = (await chamar({ acao: "listar" }, ana)).marca;
   assert.equal(marca.Logo[0].type, "image/png", "logo transparente continua PNG");
 });
+
+test("modelo do perfil: a IA lê os posts enviados (ou do Instagram) e devolve um modelo que vira padrão", async () => {
+  assert.equal((await chamar({ acao: "criarModelo", imagens: [] }, ana)).status, 400, "precisa de exemplos");
+  const original = globalThis.fetch;
+  let corpoClaude = null, pediuApify = null;
+  globalThis.fetch = async (url, op = {}) => {
+    const u = String(url);
+    if (u.includes("anthropic.com")) { corpoClaude = JSON.parse(op.body); return new Response(JSON.stringify({ content: [{ type: "text", text: JSON.stringify({ nome: "Bar escuro", base: "impacto", fonte: "bebas", caixa_alta: true, fundo: "#101820", tinta: "#fafafa", apoio: "#cccccc", destaque: "#ff5a1f", alinhar: "centro", posicao: "base", logo: "bc", moldura: { tipo: "borda", cor: "#ff5a1f", espessura: 9 }, fonte_extra: "x" }) }], stop_reason: "end_turn" }), { headers: { "content-type": "application/json" } }); }
+    if (u.includes("api.apify.com")) { pediuApify = JSON.parse(op.body); return new Response(JSON.stringify([{ type: "Image", displayUrl: "https://cdn.exemplo/ig1.jpg" }, { type: "Sidecar", childPosts: [{ displayUrl: "https://cdn.exemplo/ig2.jpg" }] }]), { headers: { "content-type": "application/json" } }); }
+    if (u.startsWith("https://cdn.exemplo/")) return new Response(Buffer.from(JPG, "base64"), { headers: { "content-type": "image/jpeg" } });
+    return original(url, op);
+  };
+  const esperar = async () => { await puxar(); for (let k = 0; k < 100; k++) { const st = (await db().query("select status from tarefas where tipo = 'criarModelo' order by criado_em desc limit 1")).rows[0].status; if (st === "feito" || st === "erro") return st; await new Promise(r => setTimeout(r, 50)); } };
+  let id;
+  try {
+    ({ id } = await chamar({ acao: "criarModelo", nome: "", imagens: [{ tipo: "image/jpeg", base64: JPG }, { tipo: "image/jpeg", base64: JPG }] }, ana));
+    const st1 = await esperar(); assert.equal(st1, "feito", (await db().query("select erro from tarefas where tipo = 'criarModelo' order by criado_em desc limit 1")).rows[0].erro);
+    await db().query("update marcas set perfil = 'https://instagram.com/barteste/' where org_id = $1", [anaOrg]);
+    await chamar({ acao: "salvarIntegracao", provedor: "apify", valor: "apify_api_teste_1234567890" }, ana);
+    const ig = await chamar({ acao: "criarModelo", instagram: true }, ana);
+    assert.equal(await esperar(), "feito");
+    assert.deepEqual(pediuApify.username, ["barteste"], "usa o @ da marca");
+    const m2 = (await chamar({ acao: "listarModelos" }, ana)).modelos.find(x => x.id === ig.id);
+    assert.equal(m2.exemplos.length, 2, "baixou os posts do Instagram (o primeiro de cada carrossel)");
+  } finally { globalThis.fetch = original; }
+  assert.equal(corpoClaude.messages[0].content.filter(c => c.type === "image").length, 2, "os exemplos vão como imagem");
+  const lista = await chamar({ acao: "listar" }, ana);
+  const m = lista.modelos.find(x => x.id === id);
+  assert.equal(m.status, "pronto");
+  assert.equal(m.nome, "Bar escuro");
+  assert.deepEqual([m.spec.base, m.spec.fonte, m.spec.fundo, m.spec.moldura.espessura], ["impacto", "bebas", "#101820", 4], "valores limpos e limitados");
+  assert.equal((await chamar({ acao: "modeloPadrao", id }, ana)).status, 200);
+  assert.equal((await chamar({ acao: "listarModelos" }, ana)).modeloPadrao, id);
+  const p = (await chamar({ acao: "pauta" }, ana)).posts.find(x => x.Status === "EmRevisao");
+  await chamar({ acao: "salvarDiagramacao", id: p.id, diagramacao: { modelo: "proprio", proprio: id } }, ana);
+  const d = JSON.parse((await chamar({ acao: "pauta" }, ana)).posts.find(x => x.id === p.id).Diagramacao);
+  assert.deepEqual([d.modelo, d.proprio], ["proprio", id]);
+  assert.equal((await chamar({ acao: "removerModelo", id }, ana)).status, 200);
+  assert.equal((await chamar({ acao: "listarModelos" }, ana)).modeloPadrao, null, "remover tira o padrão");
+});

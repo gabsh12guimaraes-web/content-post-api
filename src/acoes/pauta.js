@@ -43,13 +43,54 @@ function limparBriefing(r) {
   Object.keys(br).forEach(k => br[k] === undefined && delete br[k]);
   return br;
 }
+// Modelos do perfil da organização, com os exemplos já como anexos (prévia leve).
+async function modelosDaMarca(org, m) {
+  const { rows } = await db().query("select id, nome, spec, exemplos, status, erro, criado_em from modelos_marca where org_id = $1 order by criado_em desc", [org]);
+  const a = await anexos(org, rows.flatMap(r => r.exemplos || []));
+  return { modelos: rows.map(r => ({ id: r.id, nome: r.nome, spec: r.spec, status: r.status, erro: r.erro, exemplos: (r.exemplos || []).map(id => a.get(id)).filter(Boolean) })), modeloPadrao: (m && m.modelo_padrao) || null };
+}
 const anexosIds = lista => (Array.isArray(lista) ? lista : []).map(a => a && a.id).filter(id => UUID.test(String(id || "")));
 
 export const acoesPauta = {
   async listar(ctx) {
     const m = (await db().query("select * from marcas where org_id = $1", [ctx.org])).rows[0];
     const fontes = (await db().query("select * from fontes where org_id = $1 order by nome", [ctx.org])).rows;
-    return { marca: await marcaParaPainel(m), fontes: fontes.map(fonteParaPainel) };
+    return { marca: await marcaParaPainel(m), fontes: fontes.map(fonteParaPainel), ...(await modelosDaMarca(ctx.org, m)) };
+  },
+
+  /* ---------- modelos do perfil (a partir dos posts que a marca já publica) ---------- */
+  async listarModelos(ctx) {
+    const m = (await db().query("select modelo_padrao from marcas where org_id = $1", [ctx.org])).rows[0];
+    return modelosDaMarca(ctx.org, m);
+  },
+  async criarModelo(ctx, b) {
+    const instagram = b.instagram === true;
+    const imagens = Array.isArray(b.imagens) ? b.imagens.slice(0, 8) : [];
+    if (!instagram && imagens.length < 2) falha("Envie pelo menos 2 posts seus (até 8) para a IA entender o estilo.");
+    const total = (await db().query("select count(*)::int as n from modelos_marca where org_id = $1", [ctx.org])).rows[0].n;
+    if (total >= 10) falha("Você já tem 10 modelos. Remova algum para criar outro.");
+    if ((await db().query("select 1 from modelos_marca where org_id = $1 and status = 'gerando'", [ctx.org])).rows.length) falha("Já tem um modelo sendo criado. Espere ele ficar pronto.");
+    const exemplos = [];
+    for (const [k, im] of imagens.entries()) {
+      if (!["image/png", "image/jpeg", "image/webp"].includes(im.tipo)) falha("Envie os posts em JPG, PNG ou WEBP.");
+      exemplos.push(await salvarArquivo(ctx.org, { tipo: im.tipo, nome: `exemplo-${k + 1}`, dados: doBase64(im.base64, 8 * 1024 * 1024) }));
+    }
+    const { rows } = await db().query("insert into modelos_marca (org_id, nome, exemplos) values ($1, $2, $3) returning id", [ctx.org, texto(b.nome, 40), exemplos]);
+    await enfileirar(ctx.org, "criarModelo", { modelo: rows[0].id, instagram }, ctx.usuario.id);
+    return { id: rows[0].id };
+  },
+  async removerModelo(ctx, b) {
+    const r = (await db().query("delete from modelos_marca where id = $1 and org_id = $2 returning exemplos", [exigirId(b.id), ctx.org])).rows[0];
+    if (!r) falha("Modelo não encontrado.", 404);
+    await apagarArquivos(ctx.org, r.exemplos || []);
+    return {};
+  },
+  async modeloPadrao(ctx, b) {
+    const id = b.id ? exigirId(b.id) : null;
+    if (id && !(await db().query("select 1 from modelos_marca where id = $1 and org_id = $2 and status = 'pronto'", [id, ctx.org])).rows.length) falha("Modelo não encontrado.", 404);
+    await db().query("insert into marcas (org_id) values ($1) on conflict (org_id) do nothing", [ctx.org]);
+    await db().query("update marcas set modelo_padrao = $2 where org_id = $1", [ctx.org, id]);
+    return {};
   },
 
   async salvarMarca(ctx, b) {
@@ -285,7 +326,8 @@ export const acoesPauta = {
     const diag = {
       alinhar: um(d.alinhar, ["esquerda", "centro", "direita"]),
       posicao: um(d.posicao, ["auto", "topo", "meio", "base"]),
-      modelo: um(d.modelo, ["foto", "video", "editorial", "lateral", "impacto", "minimal", "manchete", "cinema", "claro", "escuro"]),
+      ...(d.modelo === "proprio" && UUID.test(String(d.proprio || "")) ? { proprio: String(d.proprio) } : {}),
+      modelo: um(d.modelo, ["foto", "video", "proprio", "editorial", "lateral", "impacto", "minimal", "manchete", "cinema", "claro", "escuro"]),
       fonte: um(d.fonte, ["auto", "poppins", "anton", "bebas", "archivo", "playfair", "dmserif"]),
       fundo: um(d.fundo, ["auto", "claro", "escuro", "marca"]),
       v: 3, // versão da diagramação: "auto" no fundo usa o padrão de cada modelo; Reels e Stories têm o modelo "video"
@@ -299,6 +341,7 @@ export const acoesPauta = {
       if (k >= 1 && k <= 20 && x >= 0.6 && x <= 1.6 && x !== 1) escalas[k] = x;
     }
     if (Object.keys(escalas).length) diag.escalas = escalas;
+    if (diag.modelo === "proprio" && !diag.proprio) diag.modelo = "foto";
     await db().query("update posts set diagramacao = $2, artes_prontas = case when $3 then false else artes_prontas end, atualizado_em = now() where id = $1", [p.id, JSON.stringify(diag), !!b.refazer]);
     return {};
   },

@@ -78,6 +78,26 @@ Regras:
 Responda APENAS com um objeto JSON com os mesmos campos da versão atual (legenda, hashtags, slides, cenas, prompts_imagem) mais:
 "alterou_legenda": true|false, "alterou_slides": [números], "alterou_imagens": [números], "resumo_mudancas": "frase curta dizendo o que mudou"`;
 
+export const SISTEMA_MODELO = `Você é diretor(a) de arte. As imagens são posts que a marca já publicou no Instagram. Descreva o padrão visual delas para a plataforma montar um modelo que pareça feito pela própria marca.
+
+Escolha o layout base mais parecido entre estes (o texto e o logo entram por cima da foto ou ao lado dela):
+- "foto": foto ocupando o post inteiro, véu na cor do fundo e o texto por cima, com uma barrinha de destaque.
+- "editorial": fundo liso no topo e embaixo, foto num cartão com cantos arredondados, título abaixo e texto de apoio numa caixa.
+- "lateral": fundo liso, título e texto à esquerda, foto alta à direita.
+- "impacto": fundo de cor forte, título enorme em caixa alta, foto na metade de baixo.
+- "minimal": fundo claro, título pequeno e elegante no topo, foto embaixo.
+- "manchete": fundo branco, título grande como manchete de jornal, foto num cartão embaixo.
+- "cinema": foto inteira, véu escuro embaixo e o título centralizado, em fonte com serifa.
+
+Fontes disponíveis para o título: "poppins" (sem serifa, moderna), "anton" (condensada, forte, caixa alta), "bebas" (condensada, fina, caixa alta), "archivo" (sem serifa, bem pesada), "playfair" (serifa elegante), "dmserif" (serifa clássica). Escolha a mais parecida com a dos posts.
+
+Cores em hexadecimal (#RRGGBB), tiradas das imagens: fundo (a cor de fundo ou do véu atrás do texto), tinta (cor do título), apoio (cor do texto menor) e destaque (cor de ênfase: palavras destacadas, barras, botões). Garanta contraste bom entre tinta e fundo.
+
+Moldura: "borda" se os posts têm uma borda em volta, "cantos" se têm marcas nos cantos, ou "nenhuma". espessura de 0 a 4 (em % da largura).
+
+Responda APENAS com JSON:
+{"nome":"até 4 palavras","descricao":"uma frase sobre o estilo","base":"foto","fonte":"poppins","caixa_alta":false,"fundo":"#000000","tinta":"#FFFFFF","apoio":"#DDDDDD","destaque":"#FF3355","alinhar":"esquerda|centro|direita","posicao":"topo|meio|base","logo":"te|tc|td|be|bc|bd|nenhum","moldura":{"tipo":"nenhuma|borda|cantos","cor":"#FFFFFF","espessura":0}}`;
+
 export const SISTEMA_ESCOLHA_BANCO = `Você é diretor(a) de arte da marca descrita em <marca>. Escolha, no <banco_de_imagens>, as fotos e vídeos que combinam com o post descrito em <post>, <ideia> e <briefing>.
 
 - Cada item tem um código (b1, b2... fotos; v1, v2... marcados [vídeo]) e uma descrição. Escolha só pelo que a descrição diz que aparece; não suponha o que não está escrito.

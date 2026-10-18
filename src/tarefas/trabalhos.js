@@ -3,7 +3,7 @@ import { db } from "../db.js";
 import { claude, gerarFoto, gerarFotoComPessoa, gerarClipe, coletarApify, publicarZernio, chaveDe, ErroIntegracao } from "../provedores/index.js";
 import { guardarDeUrl, apagarArquivos, anexos } from "../arquivos.js";
 import { registrar } from "./fila.js";
-import { SISTEMA_IDEIAS, SISTEMA_POST, SISTEMA_AJUSTE, SISTEMA_ESCOLHA_BANCO, idiomaDe, briefingTexto } from "./prompts.js";
+import { SISTEMA_IDEIAS, SISTEMA_POST, SISTEMA_AJUSTE, SISTEMA_ESCOLHA_BANCO, SISTEMA_MODELO, idiomaDe, briefingTexto } from "./prompts.js";
 import { devolver } from "../planos.js";
 import { lerArquivo } from "../arquivos.js";
 
@@ -96,6 +96,50 @@ registrar("ideias", async (org, pedido = {}) => {
   }
   return { criadas, aviso };
 });
+
+// Modelo do perfil: lê os posts que a marca já publica (enviados ou buscados no Instagram) e tira o padrão visual.
+const HEX = v => (/^#[0-9a-f]{6}$/i.test(String(v || "")) ? String(v).toUpperCase() : null);
+const umDe = (v, lista, padrao) => (lista.includes(v) ? v : padrao);
+export function limparSpec(c) {
+  const m = c.moldura || {};
+  return {
+    nome: String(c.nome || "Modelo do perfil").slice(0, 40), descricao: String(c.descricao || "").slice(0, 200),
+    base: umDe(c.base, ["foto", "editorial", "lateral", "impacto", "minimal", "manchete", "cinema"], "foto"),
+    fonte: umDe(c.fonte, ["poppins", "anton", "bebas", "archivo", "playfair", "dmserif"], "poppins"), caixa_alta: !!c.caixa_alta,
+    fundo: HEX(c.fundo) || "#111111", tinta: HEX(c.tinta) || "#FFFFFF", apoio: HEX(c.apoio) || HEX(c.tinta) || "#DDDDDD", destaque: HEX(c.destaque) || "#F8395A",
+    alinhar: umDe(c.alinhar, ["esquerda", "centro", "direita"], "esquerda"), posicao: umDe(c.posicao, ["topo", "meio", "base"], "base"),
+    logo: umDe(c.logo, ["te", "tc", "td", "be", "bc", "bd", "nenhum"], "te"),
+    moldura: { tipo: umDe(m.tipo, ["nenhuma", "borda", "cantos"], "nenhuma"), cor: HEX(m.cor) || "#FFFFFF", espessura: Math.max(0, Math.min(4, Number(m.espessura) || 0)) },
+  };
+}
+registrar("criarModelo", Object.assign(async (org, { modelo, instagram }) => {
+  const reg = (await db().query("select * from modelos_marca where id = $1 and org_id = $2", [modelo, org])).rows[0];
+  if (!reg) return { ignorado: "modelo removido" };
+  let exemplos = reg.exemplos || [];
+  if (instagram) {
+    const m = await marcaDe(org);
+    const perfil = String(m.perfil || "").trim().replace(/^https?:\/\/(www\.)?instagram\.com\//i, "").replace(/[/?#].*$/, "").replace(/^@/, "");
+    if (!perfil) throw new Error("cadastre o @ do Instagram em Marca e fontes para buscar os posts");
+    const itens = await coletarApify(org, "apify~instagram-post-scraper", { username: [perfil], resultsLimit: 12 });
+    const urls = itens.flatMap(i => (i.type === "Sidecar" && Array.isArray(i.childPosts) && i.childPosts[0] ? [i.childPosts[0].displayUrl] : [i.displayUrl])).filter(Boolean).slice(0, 8);
+    if (!urls.length) throw new Error("não encontrei posts públicos nesse perfil do Instagram");
+    for (const [k, u] of urls.entries()) { try { exemplos.push(await guardarDeUrl(org, u, `exemplo-${k + 1}.jpg`)); } catch (e) {} }
+    await db().query("update modelos_marca set exemplos = $2 where id = $1", [modelo, exemplos]);
+  }
+  const blocos = [];
+  const a = await anexos(org, exemplos);
+  for (const id of exemplos.slice(0, 8)) {
+    const x = a.get(id); if (!x) continue;
+    const arq = await lerArquivo(id, new URL(x.url).pathname.split("/").pop());
+    if (!arq || !["image/jpeg", "image/png", "image/webp"].includes(arq.tipo) || arq.dados.length > 3700000) continue;
+    blocos.push({ type: "image", source: { type: "base64", media_type: arq.tipo, data: arq.dados.toString("base64") } });
+  }
+  if (!blocos.length) throw new Error("não consegui ler nenhuma imagem de exemplo");
+  const c = await claude(org, { system: SISTEMA_MODELO, content: [...blocos, { type: "text", text: `São ${blocos.length} posts da marca. Descreva o padrão visual.` }], effort: "medium", max_tokens: 2000, tipo: "modelo" });
+  const spec = limparSpec(c);
+  await db().query("update modelos_marca set spec = $2, nome = case when nome = '' then $3 else nome end, status = 'pronto', erro = null where id = $1", [modelo, JSON.stringify(spec), spec.nome]);
+  return { ok: true };
+}, { aoFalhar: async (org, { modelo }, e) => { await db().query("update modelos_marca set status = 'erro', erro = $2 where id = $1", [modelo, String(e.message || e).slice(0, 300)]); } }));
 
 registrar("descreverImagem", async (org, { imagem }) => {
   const r = (await db().query("select b.*, a.tipo, a.chave from banco_imagens b join arquivos a on a.id = b.arquivo_id where b.id = $1 and b.org_id = $2", [imagem, org])).rows[0];
