@@ -821,3 +821,26 @@ test("painel admin: só o e-mail admin acessa; soma usuários, receita e custos 
     assert.ok(r.topOrgs.some(o => o.nome === "Easypeasy"));
   } finally { delete process.env.ADMIN_EMAILS; }
 });
+
+test("imagens: original comprimida, prévia leve em WebP e PNG com transparência intacto", async () => {
+  const sharp = (await import("sharp")).default;
+  const grande = await sharp(crypto.randomBytes(1500 * 1500 * 3), { raw: { width: 1500, height: 1500, channels: 3 } }).png().toBuffer();
+  const { id } = await chamar({ acao: "enviarImagemBanco", tipo: "image/png", nome: "grande.png", titulo: "Grande", base64: grande.toString("base64"), descrever: false }, ana);
+  const b = (await chamar({ acao: "listarBanco" }, ana)).imagens.find(x => x.id === id);
+  assert.equal(b.arquivo.type, "image/jpeg", "PNG sem transparência vira JPEG");
+  assert.ok(b.arquivo.size < grande.length / 2, "a original ficou bem menor");
+  assert.match(b.arquivo.thumbnails.large.url, /\?v=p$/);
+  const caminhoDe = u => new URL(u).pathname;
+  const p = await app.inject({ method: "GET", url: caminhoDe(b.arquivo.thumbnails.large.url) + "?v=p" });
+  assert.equal(p.headers["content-type"], "image/webp");
+  const m = await sharp(p.rawPayload).metadata();
+  assert.ok(Math.max(m.width, m.height) <= 720, "prévia com até 720 px");
+  const o = await sharp((await app.inject({ method: "GET", url: caminhoDe(b.arquivo.url) })).rawPayload).metadata();
+  assert.ok(Math.max(o.width, o.height) <= 2048, "original com até 2048 px");
+
+  const logo = await sharp({ create: { width: 900, height: 300, channels: 4, background: { r: 255, g: 0, b: 0, alpha: 0 } } }).png().toBuffer();
+  const r = await chamar({ acao: "enviarArquivoMarca", campo: "Logo", tipo: "image/png", nome: "logo.png", base64: logo.toString("base64") }, ana);
+  assert.equal(r.status, 200, r.erro);
+  const marca = (await chamar({ acao: "listar" }, ana)).marca;
+  assert.equal(marca.Logo[0].type, "image/png", "logo transparente continua PNG");
+});

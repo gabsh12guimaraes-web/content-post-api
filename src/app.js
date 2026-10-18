@@ -1,6 +1,8 @@
 // Servidor HTTP: POST /api (todas as ações do painel), GET /f/:id/:chave (arquivos) e GET /saude.
 import Fastify from "fastify";
 import cors from "@fastify/cors";
+import compress from "@fastify/compress";
+import zlib from "node:zlib";
 import { config } from "./config.js";
 import { db } from "./db.js";
 import { hashToken } from "./cripto.js";
@@ -53,6 +55,8 @@ async function contexto(req) {
 
 export async function criarApp() {
   const app = Fastify({ logger: false, bodyLimit: 90 * 1024 * 1024, trustProxy: true });
+  // Respostas em JSON e CSV vão comprimidas (a pauta cai de ~300 KB para ~40 KB no celular).
+  await app.register(compress, { global: true, threshold: 1024, encodings: ["br", "gzip"], brotliOptions: { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 4 } } });
   await app.register(cors, { origin: config.origens, methods: ["GET", "POST", "OPTIONS"], allowedHeaders: ["content-type", "x-pauta-token", "authorization"], maxAge: 600 });
 
   // Guarda o corpo bruto para conferir a assinatura da Kiwify.
@@ -82,7 +86,7 @@ export async function criarApp() {
   app.get("/f/:id/:chave", async (req, rep) => {
     const { id, chave } = req.params;
     if (!/^[0-9a-f-]{36}$/i.test(id)) return rep.code(404).send("não encontrado");
-    const a = await lerArquivo(id, chave);
+    const a = await lerArquivo(id, chave, { previa: req.query.v === "p" });
     if (!a) return rep.code(404).send("não encontrado");
     return rep.header("content-type", a.tipo).header("cache-control", "public, max-age=31536000, immutable")
       .header("access-control-allow-origin", "*").header("content-disposition", `inline; filename="${a.nome}"`).send(a.dados);
