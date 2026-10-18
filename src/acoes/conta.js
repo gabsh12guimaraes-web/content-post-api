@@ -79,7 +79,7 @@ export const acoesConta = {
         await tx.query("insert into marcas (org_id, nome) values ($1, $2)", [o, nomeOrg]);
       }
       return { usuario: u, org: o };
-    });
+    }).catch(e => { if (e && e.code === "23505") falha("Já existe uma conta com este e-mail. Entre com ela."); throw e; });
     const s = await abrirSessao(usuario, org, true);
     return { ...s, ...(await descrever(usuario, org)) };
   },
@@ -90,9 +90,9 @@ export const acoesConta = {
     if (!u) { await conferirSenha(senha, "x", ""); falha("E-mail ou senha incorretos.", 401); }
     if (u.bloqueado_ate && new Date(u.bloqueado_ate) > new Date()) falha("Muitas tentativas erradas. Tente de novo em 15 minutos.", 429);
     if (!(await conferirSenha(senha, u.salt, u.senha_hash))) {
-      const t = u.tentativas + 1;
+      // Soma no próprio banco: tentativas em paralelo não escapam do bloqueio.
+      const t = (await db().query("update usuarios set tentativas = tentativas + 1 where id = $1 returning tentativas", [u.id])).rows[0].tentativas;
       if (t >= 5) await db().query("update usuarios set tentativas = 0, bloqueado_ate = now() + interval '15 minutes' where id = $1", [u.id]);
-      else await db().query("update usuarios set tentativas = $2 where id = $1", [u.id, t]);
       falha(t >= 5 ? "Muitas tentativas erradas. Tente de novo em 15 minutos." : "E-mail ou senha incorretos.", 401);
     }
     await db().query("update usuarios set tentativas = 0, bloqueado_ate = null, ultimo_acesso = now() where id = $1", [u.id]);
@@ -139,7 +139,9 @@ export const acoesConta = {
     const nome = texto(b.nome, 100);
     if (!nome) falha("Dê um nome para a organização.");
     const org = await db().transacao(async tx => {
-      const o = (await tx.query("insert into organizacoes (nome, criado_por) values ($1, $2) returning id", [nome, ctx.usuario.id])).rows[0].id;
+      // O teste grátis é um por pessoa: quem já é dono de outra organização começa sem teste (precisa de plano).
+      const jaDono = (await tx.query("select 1 from membros where usuario_id = $1 and papel = 'dono' limit 1", [ctx.usuario.id])).rows.length > 0;
+      const o = (await tx.query(`insert into organizacoes (nome, criado_por${jaDono ? ", plano_ate" : ""}) values ($1, $2${jaDono ? ", now()" : ""}) returning id`, [nome, ctx.usuario.id])).rows[0].id;
       await tx.query("insert into membros (org_id, usuario_id, papel) values ($1, $2, 'dono')", [o, ctx.usuario.id]);
       await tx.query("insert into marcas (org_id, nome) values ($1, $2)", [o, nome]);
       return o;

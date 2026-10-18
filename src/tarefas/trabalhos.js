@@ -60,7 +60,7 @@ async function coletar(org, fontes) {
   return { refs, aviso: "" };
 }
 
-registrar("ideias", async (org, pedido = {}) => {
+registrar("ideias", Object.assign(async (org, pedido = {}) => {
   const FORMATOS = ["Reels", "Carrossel", "Estatico", "Stories"];
   const quantidade = Math.max(1, Math.min(20, Number(pedido.quantidade) || 10));
   const formatos = (Array.isArray(pedido.formatos) ? pedido.formatos : []).filter(f => FORMATOS.includes(f));
@@ -96,7 +96,10 @@ registrar("ideias", async (org, pedido = {}) => {
     criadas++;
   }
   return { criadas, aviso };
-});
+}, {
+  // Busca que falhou não conta no limite do plano.
+  aoFalhar: async org => { await devolver(org, "ideias"); },
+}));
 
 // Modelo do perfil: lê os posts que a marca já publica (enviados ou buscados no Instagram) e tira o padrão visual.
 const HEX = v => (/^#[0-9a-f]{6}$/i.test(String(v || "")) ? String(v).toUpperCase() : null);
@@ -320,11 +323,12 @@ registrar("criar", Object.assign(async (org, { post: id }) => {
   const content = mood.length ? [{ type: "text", text: "Mood board da marca (referência de estilo):" }, ...mood, { type: "text", text: pedidoUsuario }] : pedidoUsuario;
   const c = await claude(org, { system: SISTEMA_POST, content, effort: "high", tipo: "post" });
   const video = ehVideo(post.formato, post);
+  // Liga as mídias do banco antes de salvar: o conteúdo guardado já sai com usa_imagem/usa_video certos.
+  const doBanco = aplicarBanco(c, banco.mapa);
   await db().query("update posts set legenda = $2, hashtags = $3, slides = $4, conteudo = $5, atualizado_em = now() where id = $1",
     [post.id, c.legenda || "", (c.hashtags || []).join(" "), JSON.stringify(video ? c.cenas || [] : c.slides || []), JSON.stringify(c)]);
   // Começa do zero: apaga mídias de uma criação anterior.
   await apagarArquivos(org, [...Object.values(post.fotos || {}), ...Object.values(post.clipes || {}), ...(post.artes || [])]);
-  const doBanco = aplicarBanco(c, banco.mapa);
   const r = await gerarMidias(org, { ...post, fotos: doBanco.fotos, clipes: doBanco.clipes }, c, null);
   await db().query("update posts set fotos = $2, clipes = $3, artes = '{}', artes_prontas = false, regerar = '{}', status = 'EmRevisao', erro = $4, atualizado_em = now() where id = $1",
     [post.id, JSON.stringify(r.fotos), JSON.stringify(r.clipes), avisoFalhas(r.falhas, r.semCredito)]);
@@ -358,7 +362,10 @@ registrar("ajustar", Object.assign(async (org, { post: id, comentario, slide = 0
     c[chave] = velhos.map((v, i) => num(v, i) === slide ? (novos.find((n, k) => num(n, k) === slide) || v) : v);
     if (atual.prompts_imagem && c.prompts_imagem && typeof atual.prompts_imagem === "object") {
       const pa = atual.prompts_imagem, pn = c.prompts_imagem;
-      c.prompts_imagem = Array.isArray(pa) ? pa.map((x, i) => (num(x, i) === slide ? (Array.isArray(pn) ? pn.find((y, k) => num(y, k) === slide) : null) || x : x)) : { ...pa, [slide]: pn[slide] ?? pa[slide] };
+      const numP = (x, i) => Number(x && (x.slide ?? x.n)) || i + 1; // os prompts de imagem vêm numerados por "slide"
+      c.prompts_imagem = Array.isArray(pa) ? pa.map((x, i) => (numP(x, i) === slide ? (Array.isArray(pn) ? pn.find((y, k) => numP(y, k) === slide) : null) || x : x)) : { ...pa, [slide]: pn[slide] ?? pa[slide] };
+      // Slide que não tinha prompt (era só texto) e agora ganhou um.
+      if (Array.isArray(pa) && Array.isArray(pn) && !pa.some((x, i) => numP(x, i) === slide)) { const novo = pn.find((y, k) => numP(y, k) === slide); if (novo) c.prompts_imagem.push(novo); }
     }
     c.legenda = atual.legenda; c.hashtags = atual.hashtags;
     regerar = novaImagem ? [slide] : regerar.filter(n => n === slide);
@@ -407,6 +414,10 @@ export function conteudoPara(nome, p, midias) {
     default: return { midias, legenda, opcoes: null };
   }
 }
+// Post que ficou "Publicando" porque o servidor reiniciou no meio volta para a fila: o que já saiu está em links e não repete.
+export async function destravarPublicando(minutos = 30) {
+  await db().query(`update posts set status = 'Agendado', atualizado_em = now() where status = 'Publicando' and atualizado_em < now() - ($1 || ' minutes')::interval`, [String(minutos)]);
+}
 export async function publicarVencidos() {
   // Marca como "Publicando" antes de chamar o Zernio, para não publicar duas vezes.
   const { rows } = await db().query(`update posts set status = 'Publicando', atualizado_em = now()
@@ -432,6 +443,7 @@ async function publicarPost(p) {
       const links = { ...(p.links || {}) }, falhas = [], ids = [];
       for (const nome of redes) {
         if (links[nome]) continue; // já saiu nessa rede numa tentativa anterior
+        try {
         const c = conteudoPara(nome, p, midias);
         if (c.erro) { falhas.push(`${nome}: ${c.erro}`); continue; }
         if (p.formato === "Stories" && c.midias.length > 1) {
@@ -445,11 +457,15 @@ async function publicarPost(p) {
             if (r.ok) links[parte] = r.link || "publicado"; else { tudo = false; falhas.push(`${parte}: ${r.erro}`); break; }
           }
           if (tudo) { links[nome] = links[`${nome} · story 1`]; c.midias.forEach((_, k) => delete links[`${nome} · story ${k + 1}`]); }
+          await db().query("update posts set links = $2, atualizado_em = now() where id = $1", [p.id, JSON.stringify(links)]);
           continue;
         }
         const r = await publicarZernio(p.org_id, { rede: REDES[nome], midias: c.midias, legenda: c.legenda, opcoes: c.opcoes, chave: `pauta-${p.id}-${p.versao}-${REDES[nome]}` });
         if (r.id) ids.push(r.id);
         if (r.ok) links[nome] = r.link || "publicado"; else falhas.push(`${nome}: ${r.erro}`);
+        } catch (e) { falhas.push(`${nome}: ${String(e.message || e).slice(0, 200)}`); }
+        // Anota a cada rede: se o servidor cair no meio, uma nova tentativa não repete o que já saiu.
+        await db().query("update posts set links = $2, atualizado_em = now() where id = $1", [p.id, JSON.stringify(links)]);
       }
       const saiu = Object.keys(links).length > 0;
       const primeiro = Object.values(links).find(l => /^https?:/.test(l)) || null;

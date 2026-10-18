@@ -3,7 +3,7 @@
 // formato=br: decimais com vírgula, para a planilha em português ler os valores como número.
 import crypto from "node:crypto";
 import { db } from "./db.js";
-import { PLANOS, totalDo, CICLOS, isentos } from "./planos.js";
+import { PLANOS, totalDo, CICLOS, isentos, inicioDoMes } from "./planos.js";
 import { custoDe } from "./custos.js";
 
 export const COLUNAS = [
@@ -27,7 +27,7 @@ const dinheiro = v => (Math.round(v * 100) / 100).toFixed(2);
 const custo = c => custoDe("anthropic", "", c) + custoDe("magnific", "foto", { quantidade: c.fotos }) + custoDe("magnific", "foto_pessoa", { quantidade: c.fotos_pessoa }) + custoDe("magnific", "clipe", { quantidade: c.segundos });
 
 export async function linhasRelatorio() {
-  const inicioMes = new Date(); inicioMes.setDate(1); inicioMes.setHours(0, 0, 0, 0);
+  const inicioMes = inicioDoMes();
   const pessoas = (await db().query(`
     select u.nome, u.email, u.criado_em, u.ultimo_acesso, m.papel, o.id as org, o.nome as organizacao, o.criado_em as org_criada_em, o.plano, o.ciclo, o.plano_ate
     from usuarios u left join membros m on m.usuario_id = u.id left join organizacoes o on o.id = m.org_id

@@ -6,7 +6,7 @@ import zlib from "node:zlib";
 import { config } from "./config.js";
 import { db } from "./db.js";
 import { hashToken } from "./cripto.js";
-import { ErroApi } from "./erros.js";
+import { ErroApi, UUID } from "./erros.js";
 import { lerArquivo } from "./arquivos.js";
 import { acoesConta, acoesOrg } from "./acoes/conta.js";
 import { acoesPauta } from "./acoes/pauta.js";
@@ -37,6 +37,7 @@ function limitar(ip, acao) {
   const chave = ip + "|" + acao, agora = Date.now();
   const lista = (tentativas.get(chave) || []).filter(t => agora - t < 10 * 60000);
   lista.push(agora); tentativas.set(chave, lista);
+  if (tentativas.size > 5000) for (const [k, v] of tentativas) if (!v.length || agora - v[v.length - 1] > 10 * 60000) tentativas.delete(k);
   if (lista.length > 30) throw new ErroApi("Muitas tentativas deste endereço. Espere alguns minutos.", 429);
 }
 
@@ -54,7 +55,7 @@ async function contexto(req) {
 }
 
 export async function criarApp() {
-  const app = Fastify({ logger: false, bodyLimit: 90 * 1024 * 1024, trustProxy: true });
+  const app = Fastify({ logger: false, bodyLimit: 90 * 1024 * 1024, trustProxy: Number(process.env.PROXIES_CONFIAVEIS || 1) });
   // Respostas em JSON e CSV vão comprimidas (a pauta cai de ~300 KB para ~40 KB no celular).
   await app.register(compress, { global: true, threshold: 1024, encodings: ["br", "gzip"], brotliOptions: { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 4 } } });
   await app.register(cors, { origin: config.origens, methods: ["GET", "POST", "OPTIONS"], allowedHeaders: ["content-type", "x-pauta-token", "authorization"], maxAge: 600 });
@@ -85,7 +86,7 @@ export async function criarApp() {
 
   app.get("/f/:id/:chave", async (req, rep) => {
     const { id, chave } = req.params;
-    if (!/^[0-9a-f-]{36}$/i.test(id)) return rep.code(404).send("não encontrado");
+    if (!UUID.test(id)) return rep.code(404).send("não encontrado");
     const a = await lerArquivo(id, chave, { previa: req.query.v === "p" });
     if (!a) return rep.code(404).send("não encontrado");
     return rep.header("content-type", a.tipo).header("cache-control", "public, max-age=31536000, immutable")
@@ -96,7 +97,7 @@ export async function criarApp() {
     const b = (req.body && typeof req.body === "object") ? req.body : {};
     const acao = String(b.acao || "");
     try {
-      const fn = TODAS[acao];
+      const fn = Object.hasOwn(TODAS, acao) ? TODAS[acao] : null;
       if (!fn) throw new ErroApi("Ação desconhecida.");
       let ctx = null;
       if (PUBLICAS.has(acao)) limitar(req.ip, acao);

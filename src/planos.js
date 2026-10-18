@@ -43,17 +43,18 @@ export function catalogo() {
   };
 }
 
-const inicioDoMes = () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); };
+// Início do mês no horário de Brasília (UTC−3, sem horário de verão): o limite vira à meia-noite daqui, não do servidor.
+export const inicioDoMes = (agora = new Date()) => { const br = new Date(agora.getTime() - 3 * 3600000); return new Date(Date.UTC(br.getUTCFullYear(), br.getUTCMonth(), 1, 3)); };
 
-export async function situacao(org) {
-  const o = (await db().query(
+export async function situacao(org, q = db()) {
+  const o = (await q.query(
     `select o.plano, o.ciclo, o.plano_ate, exists (select 1 from membros m join usuarios u on u.id = m.usuario_id
        where m.org_id = o.id and m.papel = 'dono' and lower(u.email) = any($2::text[])) as isenta
      from organizacoes o where o.id = $1`, [org, isentos()])).rows[0];
   if (!o) throw new ErroApi("Organização não encontrada.", 404);
   const plano = PLANOS[o.plano] || PLANOS.teste;
   const desde = o.plano === "teste" ? new Date(0) : inicioDoMes();
-  const usos = (await db().query("select tipo, count(*)::int as n from uso where org_id = $1 and criado_em >= $2 group by tipo", [org, desde])).rows;
+  const usos = (await q.query("select tipo, count(*)::int as n from uso where org_id = $1 and criado_em >= $2 group by tipo", [org, desde])).rows;
   const n = t => (usos.find(u => u.tipo === t) || { n: 0 }).n;
   return {
     plano: o.plano, nome: plano.nome, ciclo: o.ciclo, ate: o.plano_ate,
@@ -65,8 +66,11 @@ export async function situacao(org) {
 
 // Confere o limite antes de gastar IA e registra o uso.
 export async function usar(org, tipo) {
+  // Conta e registra numa transação com a organização travada: pedidos em paralelo não passam do limite.
+  return db().transacao(async tx => {
+  await tx.query("select id from organizacoes where id = $1 for update", [org]);
   if (cobrancaLigada()) {
-    const s = await situacao(org);
+    const s = await situacao(org, tx);
     if (!s.isenta) {
       if (!s.ativo) throw new ErroApi(s.plano === "teste" ? "Seu teste grátis terminou. Escolha um plano para continuar criando." : "Seu plano venceu. Renove para continuar criando.", 402, { plano: true });
       const lim = tipo === "post" ? s.posts : { usados: s.ideias.usadas, limite: s.ideias.limite };
@@ -75,7 +79,8 @@ export async function usar(org, tipo) {
           : `Você já usou as ${lim.limite} buscas de ideias ${s.periodo === "teste" ? "do teste" : "do plano neste mês"}.`, 402, { plano: true });
     }
   }
-  await db().query("insert into uso (org_id, tipo) values ($1, $2)", [org, tipo]);
+  await tx.query("insert into uso (org_id, tipo) values ($1, $2)", [org, tipo]);
+  });
 }
 // Devolve o uso se a tarefa nem chegou a começar (ex.: erro ao enfileirar).
 export async function devolver(org, tipo) {

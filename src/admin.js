@@ -1,7 +1,7 @@
 // Painel admin da plataforma: usuários, assinaturas, receita e tudo que gera gasto (Claude, Magnific, Apify, Zernio, Railway).
 // Só os e-mails de ADMIN_EMAILS entram; a checagem é aqui na API, não só no painel.
 import { db } from "./db.js";
-import { PLANOS, CICLOS, totalDo, isentos } from "./planos.js";
+import { PLANOS, CICLOS, totalDo, isentos, inicioDoMes } from "./planos.js";
 import { CUSTO, KIWIFY, DOLAR, custoDe } from "./custos.js";
 import { ErroApi } from "./erros.js";
 
@@ -14,7 +14,7 @@ const r2 = v => Math.round(v * 100) / 100;
 
 export async function painelAdmin(ctx) {
   if (!ctx || !ctx.usuario || !ehAdmin(ctx.usuario.email)) throw new ErroApi("Acesso restrito ao administrador da plataforma.", 403);
-  const agora = new Date(), inicioMes = new Date(agora.getFullYear(), agora.getMonth(), 1);
+  const agora = new Date(), inicioMes = inicioDoMes(agora);
   const d30 = new Date(agora.getTime() - 30 * 86400000), d7 = new Date(agora.getTime() - 7 * 86400000);
   const q = async (sql, p = []) => (await db().query(sql, p)).rows;
 

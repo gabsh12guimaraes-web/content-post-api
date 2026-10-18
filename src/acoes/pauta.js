@@ -8,7 +8,7 @@ import { cifrar } from "../cripto.js";
 import { podeGerir } from "./conta.js";
 import { publicarJa, REDES_PUBLICACAO, escolherDoBanco } from "../tarefas/trabalhos.js";
 import { redesConectadas } from "../provedores/index.js";
-import { usar } from "../planos.js";
+import { usar, devolver } from "../planos.js";
 
 const LOGOS = ["Logo", "LogoDark", "SimboloLight", "SimboloDark"];
 const STATUS_IDEIA = ["Sugerida", "Aprovada", "Descartada", "Guardada"];
@@ -298,6 +298,7 @@ export const acoesPauta = {
   async removerPost(ctx, b) {
     const p = await postDaOrg(ctx.org, b.id);
     if (p.status === "Publicado") falha("Post publicado não sai do calendário.");
+    if (p.status === "Publicando") falha("Este post está sendo publicado agora. Espere terminar.");
     await db().transacao(async tx => {
       if (p.ideia_id) await tx.query("update ideias set status = 'Guardada' where id = $1 and org_id = $2", [p.ideia_id, ctx.org]);
       await tx.query("delete from posts where id = $1", [p.id]);
@@ -308,6 +309,7 @@ export const acoesPauta = {
 
   async salvarArtes(ctx, b) {
     const p = await postDaOrg(ctx.org, b.id);
+    if (["Publicando", "Publicado"].includes(p.status)) falha("Este post já foi publicado ou está sendo publicado.");
     const artes = Array.isArray(b.artes) ? b.artes : [];
     if (!artes.length || artes.length > 10) falha("Envie de 1 a 10 artes.");
     const ids = [];
@@ -374,7 +376,9 @@ export const acoesPauta = {
       return { ...velho, titulo: texto(n && n.titulo, 300), texto: texto(n && n.texto, 1500) };
     });
     const legenda = texto(b.legenda, 2200), hashtags = texto(b.hashtags, 600);
-    const conteudo = { ...(p.conteudo || {}), slides, legenda, hashtags: hashtags.split(/s+/).filter(Boolean) };
+    // Reels e stories em vídeo guardam o roteiro em "cenas"; o resto, em "slides".
+    const emCenas = ["Reels", "Stories"].includes(p.formato) && !(p.briefing && ["imagem", "sequencia"].includes(p.briefing.story));
+    const conteudo = { ...(p.conteudo || {}), [emCenas ? "cenas" : "slides"]: slides, legenda, hashtags: hashtags.split(/\s+/).filter(Boolean) };
     await db().query("update posts set slides = $2, legenda = $3, hashtags = $4, conteudo = $5, artes_prontas = false, atualizado_em = now() where id = $1",
       [p.id, JSON.stringify(slides), legenda, hashtags, JSON.stringify(conteudo)]);
     return {};
@@ -417,7 +421,7 @@ export const acoesPauta = {
       formatos: (Array.isArray(b.formatos) ? b.formatos : []).filter(f => FORMATOS.includes(f)),
     };
     await usar(ctx.org, "ideias");
-    await enfileirar(ctx.org, "ideias", pedido, ctx.usuario.id);
+    try { await enfileirar(ctx.org, "ideias", pedido, ctx.usuario.id); } catch (e) { await devolver(ctx.org, "ideias"); throw e; }
     return {};
   },
 
@@ -434,7 +438,7 @@ export const acoesPauta = {
     if (!podeGerir(ctx.papel)) falha("Só donos e administradores podem importar.", 403);
     const base = texto(b.base, 30), token = String(b.token || "").trim();
     if (!/^app[A-Za-z0-9]{14}$/.test(base)) falha("O ID da base começa com app e tem 17 caracteres.");
-    if (token.length < 20 || /s/.test(token)) falha("Cole o token do Airtable inteiro.");
+    if (token.length < 20 || /\s/.test(token)) falha("Cole o token do Airtable inteiro.");
     const rodando = await db().query("select 1 from tarefas where org_id = $1 and tipo = 'importar' and status in ('pendente', 'rodando')", [ctx.org]);
     if (rodando.rows.length) falha("Já tem uma importação em andamento.");
     await enfileirar(ctx.org, "importar", { token: cifrar(token), base }, ctx.usuario.id);
@@ -458,9 +462,12 @@ export const acoesPauta = {
       if (!pe) falha("Essa pessoa não está mais cadastrada. Escolha outra ou envie a foto de novo.");
       if (pe.nome) br.pessoaNome = pe.nome;
     }
-    await usar(ctx.org, "post");
-    await db().query("update posts set status = 'EmCriacao', erro = null, briefing = $2, atualizado_em = now() where id = $1", [p.id, Object.keys(br).length ? JSON.stringify(br) : null]);
-    await enfileirar(ctx.org, "criar", { post: p.id }, ctx.usuario.id);
+    // Marca "EmCriacao" antes de cobrar: um clique duplo (ou duas abas) não cria nem cobra duas vezes.
+    const tomou = await db().query("update posts set status = 'EmCriacao', erro = null, briefing = $2, atualizado_em = now() where id = $1 and status in ('Planejado', 'Erro') returning id", [p.id, Object.keys(br).length ? JSON.stringify(br) : null]);
+    if (!tomou.rows.length) falha("Este post já está sendo criado.");
+    const voltar = () => db().query("update posts set status = $2 where id = $1 and status = 'EmCriacao'", [p.id, p.status]);
+    try { await usar(ctx.org, "post"); } catch (e) { await voltar(); throw e; }
+    try { await enfileirar(ctx.org, "criar", { post: p.id }, ctx.usuario.id); } catch (e) { await devolver(ctx.org, "post"); await voltar(); throw e; }
     return {};
   },
 };

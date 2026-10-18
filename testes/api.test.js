@@ -965,3 +965,39 @@ test("trocar a foto de um story por vídeo do banco tira a foto antiga (e vice-v
   assert.deepEqual(post.clipes, {});
   assert.equal((await db().query("select count(*)::int as n from arquivos where id = $1", [arqV])).rows[0].n, 1, "o vídeo continua no banco");
 });
+
+test("revisão: login em paralelo bloqueia, limite do plano aguenta concorrência, hashtags e criarPost duplo", async () => {
+  // senha errada em paralelo: o bloqueio de 5 tentativas vale
+  const em = "paralelo" + Date.now() + "@x.com";
+  await chamar({ acao: "cadastrar", nome: "P", email: em, senha: "segredo123", organizacao: "Par" });
+  await Promise.all(Array.from({ length: 12 }, () => app.inject({ method: "POST", url: "/api", payload: { acao: "entrar", email: em, senha: "errada999" } })));
+  assert.equal((await chamar({ acao: "entrar", email: em, senha: "segredo123" })).status, 429, "conta bloqueada depois de 5 erros");
+
+  // arquivo com id inválido: 404, não 500; ação herdada do Object não existe
+  assert.equal((await app.inject({ method: "GET", url: "/f/------------------------------------/abc" })).statusCode, 404);
+  assert.equal((await chamar({ acao: "constructor" }, ana)).status, 400);
+
+  // limite do teste (3 posts) com pedidos em paralelo
+  process.env.COBRANCA = "sim";
+  try {
+    const { usar } = await import("../src/planos.js");
+    const o = (await db().query("insert into organizacoes (nome) values ('Concorrência') returning id")).rows[0].id;
+    const r = await Promise.allSettled(Array.from({ length: 8 }, () => usar(o, "post")));
+    assert.equal(r.filter(x => x.status === "fulfilled").length, 3);
+    assert.equal((await db().query("select count(*)::int as n from uso where org_id = $1", [o])).rows[0].n, 3);
+  } finally { delete process.env.COBRANCA; }
+
+  // hashtags salvas não se partem na letra "s"
+  const { rows: [p] } = await db().query("insert into posts (org_id, titulo, data_publicacao, rede, formato, status, slides) values ($1, 'Tags', now() + interval '9 days', 'Instagram', 'Carrossel', 'EmRevisao', '[{\"n\":1}]') returning id", [anaOrg]);
+  assert.equal((await chamar({ acao: "salvarTextos", id: p.id, slides: [{ n: 1, titulo: "T", texto: "x" }], legenda: "L", hashtags: "#sucesso #dicas" }, ana)).status, 200);
+  assert.deepEqual((await db().query("select conteudo from posts where id = $1", [p.id])).rows[0].conteudo.hashtags, ["#sucesso", "#dicas"]);
+
+  // clique duplo em "Criar post": um só cobra e enfileira
+  const { rows: [q] } = await db().query("insert into posts (org_id, titulo, data_publicacao, rede, formato, status) values ($1, 'Duplo', now() + interval '9 days', 'Instagram', 'Carrossel', 'Planejado') returning id", [anaOrg]);
+  const antes = (await db().query("select count(*)::int as n from uso where org_id = $1", [anaOrg])).rows[0].n;
+  const rs = await Promise.all([chamar({ acao: "criarPost", id: q.id }, ana), chamar({ acao: "criarPost", id: q.id }, ana)]);
+  assert.deepEqual(rs.map(x => x.status).sort(), [200, 400]);
+  assert.equal((await db().query("select count(*)::int as n from uso where org_id = $1", [anaOrg])).rows[0].n, antes + 1);
+  assert.equal((await db().query("select count(*)::int as n from tarefas where tipo = 'criar' and payload->>'post' = $1", [q.id])).rows[0].n, 1);
+  await db().query("delete from tarefas where tipo = 'criar' and payload->>'post' = $1", [q.id]);
+});

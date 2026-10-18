@@ -45,7 +45,9 @@ async function executar(t) {
 // Tarefas que ficaram "rodando" quando o servidor reiniciou voltam para a fila (até 3 tentativas).
 async function recuperar() {
   await db().query("update tarefas set status = 'pendente' where status = 'rodando' and tentativas < 3");
-  await db().query("update tarefas set status = 'erro', erro = 'interrompida várias vezes' where status = 'rodando'");
+  const { rows } = await db().query("update tarefas set status = 'erro', erro = 'interrompida várias vezes' where status = 'rodando' returning *");
+  // Sem isso o post ficaria "Em criação" para sempre (e o crédito do plano não voltaria).
+  for (const t of rows) { const fn = TRABALHOS[t.tipo]; if (fn && fn.aoFalhar) await fn.aoFalhar(t.org_id, t.payload || {}, new Error("o servidor reiniciou várias vezes durante a tarefa")).catch(() => {}); }
 }
 
 export async function iniciarTrabalhador(relogios = []) {
