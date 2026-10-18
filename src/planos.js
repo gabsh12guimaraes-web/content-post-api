@@ -1,5 +1,6 @@
 // Planos, limites de uso e assinatura pela Kiwify.
 // Os preços precisam ser iguais aos dos produtos criados na Kiwify (o cálculo está em PRECOS.md).
+// "de" é o preço antigo, mostrado riscado enquanto durar a promoção.
 import crypto from "node:crypto";
 import { db } from "./db.js";
 import { ErroApi } from "./erros.js";
@@ -8,9 +9,9 @@ const env = process.env;
 
 export const PLANOS = {
   teste: { nome: "Teste grátis", posts: 3, ideias: 2, precos: null },
-  essencial: { nome: "Essencial", posts: 12, ideias: 8, precos: { mensal: 177, semestral: 169, anual: 164 } },
-  profissional: { nome: "Profissional", posts: 30, ideias: 20, precos: { mensal: 417, semestral: 407, anual: 399 } },
-  agencia: { nome: "Agência", posts: 80, ideias: 50, precos: { mensal: 1097, semestral: 1067, anual: 1049 } },
+  essencial: { nome: "Essencial", posts: 12, ideias: 8, de: { mensal: 369, semestral: 339, anual: 307 }, precos: { mensal: 177, semestral: 169, anual: 164 } },
+  profissional: { nome: "Profissional", posts: 30, ideias: 20, de: { mensal: 877, semestral: 807, anual: 729 }, precos: { mensal: 417, semestral: 407, anual: 399 } },
+  agencia: { nome: "Agência", posts: 80, ideias: 50, de: { mensal: 2307, semestral: 2117, anual: 1919 }, precos: { mensal: 1097, semestral: 1067, anual: 1049 } },
 };
 export const CICLOS = { mensal: 1, semestral: 6, anual: 12 };
 
@@ -25,7 +26,7 @@ export function catalogo() {
   return {
     planos: Object.entries(PLANOS).filter(([, p]) => p.precos).map(([id, p]) => ({
       id, nome: p.nome, posts: p.posts, ideias: p.ideias,
-      ciclos: Object.entries(p.precos).map(([ciclo, porMes]) => ({ ciclo, meses: CICLOS[ciclo], porMes, total: porMes * CICLOS[ciclo], checkout: links[`${id}:${ciclo}`] || null })),
+      ciclos: Object.entries(p.precos).map(([ciclo, porMes]) => ({ ciclo, meses: CICLOS[ciclo], porMes, dePorMes: p.de?.[ciclo] || null, total: porMes * CICLOS[ciclo], checkout: links[`${id}:${ciclo}`] || null })),
     })),
     afiliados: env.KIWIFY_AFILIADOS || null,
     teste: { posts: PLANOS.teste.posts, dias: 7 },
