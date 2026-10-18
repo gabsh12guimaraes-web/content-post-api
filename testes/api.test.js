@@ -759,3 +759,12 @@ test("tamanho do texto por slide fica na diagramação, só com valores válidos
   assert.deepEqual(d.escalas, { 1: 1.3, 4: 0.6 });
   assert.equal(d.modelo, "impacto");
 });
+
+test("lê o JSON do Claude com texto em volta ou dividido em vários objetos", async () => {
+  const { extrairJson } = await import("../src/provedores/index.js");
+  assert.deepEqual(extrairJson('{"ideias":[{"titulo":"a"}]}'), { ideias: [{ titulo: "a" }] });
+  assert.deepEqual(extrairJson('Aqui está:\n```json\n{"ideias":[{"titulo":"a {b}"}]}\n```\nEspero que ajude {:'), { ideias: [{ titulo: "a {b}" }] });
+  assert.deepEqual(extrairJson('{"ideias":[{"titulo":"a"}]}\n{"ideias":[{"titulo":"b \\"c\\""}],"extra":1}'), { ideias: [{ titulo: "a" }, { titulo: 'b "c"' }], extra: 1 });
+  assert.equal(extrairJson("sem json aqui"), null);
+  assert.equal(extrairJson('{"cortado": ['), null);
+});

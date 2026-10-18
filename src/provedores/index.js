@@ -44,9 +44,34 @@ export async function claude(org, { system, content, effort = "medium", max_toke
   if (j.stop_reason === "refusal") throw new ErroIntegracao("o Claude recusou o pedido");
   if (j.stop_reason === "max_tokens") throw new ErroIntegracao("a resposta ficou longa demais e foi cortada");
   const txt = (j.content || []).filter(b => b.type === "text").map(b => b.text).join("");
-  const m = txt.match(/\{[\s\S]*\}/);
-  if (!m) throw new ErroIntegracao("a resposta do Claude não veio em JSON");
-  return JSON.parse(m[0]);
+  const dados = extrairJson(txt);
+  if (!dados) throw new ErroIntegracao("a resposta do Claude não veio em JSON");
+  return dados;
+}
+// Lê o JSON da resposta mesmo com texto antes ou depois, ou com o conteúdo dividido em vários objetos
+// (as listas de cada um são juntadas; nos outros campos vale o primeiro objeto).
+export function extrairJson(txt) {
+  const objetos = [];
+  for (let i = 0; i < txt.length; i++) {
+    if (txt[i] !== "{") continue;
+    let nivel = 0, aspas = false, escape = false, fim = -1;
+    for (let k = i; k < txt.length; k++) {
+      const c = txt[k];
+      if (aspas) { if (escape) escape = false; else if (c === "\\") escape = true; else if (c === '"') aspas = false; continue; }
+      if (c === '"') aspas = true;
+      else if (c === "{") nivel++;
+      else if (c === "}" && --nivel === 0) { fim = k; break; }
+    }
+    if (fim < 0) break;
+    try { const o = JSON.parse(txt.slice(i, fim + 1)); if (o && typeof o === "object" && !Array.isArray(o)) { objetos.push(o); i = fim; } } catch (e) {}
+  }
+  if (!objetos.length) return null;
+  const junto = { ...objetos[0] };
+  for (const o of objetos.slice(1)) for (const [k, v] of Object.entries(o)) {
+    if (Array.isArray(junto[k]) && Array.isArray(v)) junto[k] = junto[k].concat(v);
+    else if (!(k in junto)) junto[k] = v;
+  }
+  return junto;
 }
 
 /* ---------- Magnific (fotos Mystic e clipes Kling 3) ---------- */
