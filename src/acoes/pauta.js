@@ -285,10 +285,10 @@ export const acoesPauta = {
     const diag = {
       alinhar: um(d.alinhar, ["esquerda", "centro", "direita"]),
       posicao: um(d.posicao, ["auto", "topo", "meio", "base"]),
-      modelo: um(d.modelo, ["foto", "editorial", "lateral", "impacto", "minimal", "manchete", "cinema", "claro", "escuro"]),
+      modelo: um(d.modelo, ["foto", "video", "editorial", "lateral", "impacto", "minimal", "manchete", "cinema", "claro", "escuro"]),
       fonte: um(d.fonte, ["auto", "poppins", "anton", "bebas", "archivo", "playfair", "dmserif"]),
       fundo: um(d.fundo, ["auto", "claro", "escuro", "marca"]),
-      v: 2, // versão da diagramação: "auto" no fundo usa o padrão de cada modelo
+      v: 3, // versão da diagramação: "auto" no fundo usa o padrão de cada modelo; Reels e Stories têm o modelo "video"
       logo: um(d.logo, ["auto", "light", "dark", "simLight", "simDark", "nenhum"]),
       logoPos: um(d.logoPos, ["te", "tc", "td", "be", "bc", "bd"]),
     };

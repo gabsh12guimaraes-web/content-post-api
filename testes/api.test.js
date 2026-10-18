@@ -758,7 +758,7 @@ test("tamanho do texto por slide fica na diagramação, só com valores válidos
   const d = JSON.parse((await chamar({ acao: "pauta" }, ana)).posts.find(x => x.id === p.id).Diagramacao);
   assert.deepEqual(d.escalas, { 1: 1.3, 4: 0.6 });
   assert.equal(d.fundo, "auto", "sem escolha, o fundo é o do modelo");
-  assert.equal(d.v, 2);
+  assert.equal(d.v, 3);
   assert.equal(d.modelo, "impacto");
 });
 
