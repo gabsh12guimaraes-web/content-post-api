@@ -22,7 +22,9 @@ export const COLUNAS = [
   ["fotos_no_banco", "Fotos no banco"], ["pessoas_cadastradas", "Pessoas cadastradas"],
 ];
 
-const dataIso = d => (d ? new Date(d).toISOString().slice(0, 16).replace("T", " ") : "");
+// Datas no horário de Brasília, num formato que a planilha lê como data ("2026-10-18 14:34").
+const FUSO = new Intl.DateTimeFormat("sv-SE", { timeZone: process.env.FUSO_RELATORIO || "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+const dataIso = d => (d ? FUSO.format(new Date(d)) : "");
 const dinheiro = v => (Math.round(v * 100) / 100).toFixed(2);
 const custo = c => (Number(c.entrada) * CUSTO.entrada + Number(c.saida) * CUSTO.saida + Number(c.cache_leitura) * CUSTO.cacheLeitura + Number(c.cache_escrita) * CUSTO.cacheEscrita) / 1e6
   + Number(c.fotos) * CUSTO.foto + Number(c.fotos_pessoa) * CUSTO.fotoPessoa + Number(c.segundos) * CUSTO.clipeSegundo;
