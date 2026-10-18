@@ -287,7 +287,8 @@ export const acoesPauta = {
       posicao: um(d.posicao, ["auto", "topo", "meio", "base"]),
       modelo: um(d.modelo, ["foto", "editorial", "lateral", "impacto", "minimal", "manchete", "cinema", "claro", "escuro"]),
       fonte: um(d.fonte, ["auto", "poppins", "anton", "bebas", "archivo", "playfair", "dmserif"]),
-      fundo: um(d.fundo, ["claro", "escuro"]),
+      fundo: um(d.fundo, ["auto", "claro", "escuro", "marca"]),
+      v: 2, // versão da diagramação: "auto" no fundo usa o padrão de cada modelo
       logo: um(d.logo, ["auto", "light", "dark", "simLight", "simDark", "nenhum"]),
       logoPos: um(d.logoPos, ["te", "tc", "td", "be", "bc", "bd"]),
     };
