@@ -1048,3 +1048,35 @@ test("publicação: Reels de teste no Instagram e selo de conteúdo feito com IA
   post = (await chamar({ acao: "pauta" }, ana)).posts.find(p => p.id === id);
   assert.deepEqual(post.Publicacao, { conteudoIa: false });
 });
+
+test("vídeos: índice vai para o começo, capa vira prévia e o arquivo sai aos pedaços (Range)", async () => {
+  const { salvarArquivo, mp4Faststart } = await import("../src/arquivos.js");
+  // MP4 mínimo com moov no fim: ftyp + mdat (8 bytes de amostra) + moov com um stco apontando para a amostra
+  const caixa = (t, corpo) => { const b = Buffer.alloc(8 + corpo.length); b.writeUInt32BE(b.length); b.write(t, 4, "latin1"); corpo.copy(b, 8); return b; };
+  const ftyp = caixa("ftyp", Buffer.from("isom\0\0\0\0isom", "latin1")), mdat = caixa("mdat", Buffer.from("AMOSTRA!"));
+  const stcoCorpo = Buffer.alloc(12); stcoCorpo.writeUInt32BE(1, 4); stcoCorpo.writeUInt32BE(ftyp.length + 8, 8);
+  const moov = caixa("moov", caixa("trak", caixa("mdia", caixa("minf", caixa("stbl", caixa("stco", stcoCorpo))))));
+  const original = Buffer.concat([ftyp, mdat, moov]);
+  const rapido = mp4Faststart(original);
+  assert.equal(rapido.toString("latin1", ftyp.length + 4, ftyp.length + 8), "moov");
+  const pos = rapido.indexOf("stco", 0, "latin1") + 12;
+  const amostra = rapido.readUInt32BE(pos);
+  assert.equal(rapido.toString("latin1", amostra, amostra + 8), "AMOSTRA!", "o stco aponta para a amostra no lugar novo");
+  assert.equal(mp4Faststart(rapido), rapido, "já rápido: não mexe");
+
+  const capa = Buffer.from(JPG, "base64");
+  const id = await salvarArquivo(anaOrg, { tipo: "video/mp4", nome: "v.mp4", dados: original, capa });
+  const a = (await db().query("select chave, previa, tamanho from arquivos where id = $1", [id])).rows[0];
+  assert.equal(a.previa, true, "a capa virou prévia");
+  const url = `/f/${id}/${a.chave}`;
+  const p = await app.inject({ method: "GET", url, headers: { range: "bytes=0-15" } });
+  assert.equal(p.statusCode, 206);
+  assert.equal(p.headers["content-range"], `bytes 0-15/${original.length}`);
+  assert.equal(p.rawPayload.length, 16);
+  assert.equal(p.rawPayload.toString("latin1", 4, 8), "ftyp");
+  const inteiro = await app.inject({ method: "GET", url });
+  assert.equal(inteiro.statusCode, 200); assert.equal(inteiro.headers["accept-ranges"], "bytes"); assert.equal(inteiro.rawPayload.length, original.length);
+  assert.equal((await app.inject({ method: "GET", url, headers: { range: "bytes=999999-" } })).statusCode, 416);
+  const pv = await app.inject({ method: "GET", url: url + "?v=p" });
+  assert.equal(pv.headers["content-type"], "image/webp");
+});

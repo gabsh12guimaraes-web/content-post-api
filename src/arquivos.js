@@ -1,6 +1,7 @@
 // Arquivos (logos, mood board, fotos, clipes, artes) ficam na pasta do Volume, um por id.
 // O link público /f/:id/:chave não exige login (o Zernio e o navegador precisam abrir), mas a chave é secreta.
 import fs from "node:fs/promises";
+import { createReadStream } from "node:fs";
 import path from "node:path";
 import { config } from "./config.js";
 import { db } from "./db.js";
@@ -27,9 +28,57 @@ async function otimizarImagem(tipo, dados) {
   const previa = await sharp(saida || dados, { failOn: "none" }).resize({ width: LADO_PREVIA, height: LADO_PREVIA, fit: "inside", withoutEnlargement: true }).webp({ quality: 74 }).toBuffer();
   return { dados: saida || dados, tipo: novoTipo, previa };
 }
+// MP4 com o índice (moov) no fim obriga o navegador a baixar o vídeo inteiro antes de tocar. Aqui o moov vai para o começo
+// (como o "faststart" do ffmpeg): os deslocamentos das amostras (stco/co64) são corrigidos e nada é recodificado.
+// Vídeo fragmentado, já com moov no começo ou que não dá para entender volta como veio.
+export function mp4Faststart(dados) {
+  const caixas = [];
+  for (let i = 0; i + 8 <= dados.length;) {
+    let tam = dados.readUInt32BE(i), cab = 8;
+    const tipo = dados.toString("latin1", i + 4, i + 8);
+    if (tam === 1) { if (i + 16 > dados.length) return dados; tam = Number(dados.readBigUInt64BE(i + 8)); cab = 16; }
+    else if (tam === 0) tam = dados.length - i;
+    if (tam < cab || i + tam > dados.length) return dados;
+    caixas.push({ tipo, ini: i, tam }); i += tam;
+  }
+  const moov = caixas.find(c => c.tipo === "moov"), mdat = caixas.findIndex(c => c.tipo === "mdat");
+  if (!moov || mdat < 0 || caixas.some(c => c.tipo === "moof") || caixas.indexOf(moov) < mdat) return dados;
+  const novoMoov = Buffer.from(dados.subarray(moov.ini, moov.ini + moov.tam));
+  const delta = moov.tam;
+  const CONTEINERES = new Set(["moov", "trak", "mdia", "minf", "stbl", "edts", "dinf", "mvex", "udta"]);
+  let ok = true;
+  const andar = (ini, fim) => {
+    for (let i = ini; i + 8 <= fim && ok;) {
+      const tam = novoMoov.readUInt32BE(i), tipo = novoMoov.toString("latin1", i + 4, i + 8);
+      if (tam < 8 || i + tam > fim) { ok = false; return; }
+      if (CONTEINERES.has(tipo)) andar(i + 8, i + tam);
+      else if (tipo === "stco") { const n = novoMoov.readUInt32BE(i + 12); for (let k = 0; k < n; k++) { const p = i + 16 + k * 4, v = novoMoov.readUInt32BE(p) + delta; if (v > 0xFFFFFFFF) { ok = false; return; } novoMoov.writeUInt32BE(v, p); } }
+      else if (tipo === "co64") { const n = novoMoov.readUInt32BE(i + 12); for (let k = 0; k < n; k++) { const p = i + 16 + k * 8; novoMoov.writeBigUInt64BE(novoMoov.readBigUInt64BE(p) + BigInt(delta), p); } }
+      i += tam;
+    }
+  };
+  andar(8, novoMoov.length);
+  if (!ok) return dados;
+  // ftyp (e o que vier antes do 1º mdat) + moov + o resto, na ordem original
+  const antes = caixas.slice(0, mdat).filter(c => c !== moov), depois = caixas.slice(mdat).filter(c => c !== moov);
+  const pedaco = c => dados.subarray(c.ini, c.ini + c.tam);
+  // moov entra logo antes do 1º mdat: só o que estava depois dele muda de lugar (delta = tamanho do moov)
+  return Buffer.concat([...antes.map(pedaco), novoMoov, ...depois.map(pedaco)]);
+}
+// Vídeos: índice no começo e, se veio uma capa (quadro do vídeo), ela vira a prévia leve (lista e pôster).
+async function tratarVideo(a, capa) {
+  const dados = await fs.readFile(caminho(a.org_id, a.id));
+  const novo = mp4Faststart(dados);
+  if (novo !== dados) await fs.writeFile(caminho(a.org_id, a.id), novo);
+  let previa = false;
+  if (capa) { try { await fs.writeFile(caminho(a.org_id, a.id) + ".p", await sharp(capa, { failOn: "none" }).resize({ width: LADO_PREVIA, height: LADO_PREVIA, fit: "inside", withoutEnlargement: true }).webp({ quality: 72 }).toBuffer()); previa = true; } catch (e) {} }
+  await db().query(`update arquivos set tamanho = $2, tratado = true${previa ? ", previa = true" : ""} where id = $1`, [a.id, novo.length]);
+  return true;
+}
 // Otimiza um arquivo já salvo (no disco e no banco). Falhas deixam a original como está.
-export async function tratarArquivo(a) {
+export async function tratarArquivo(a, { capa } = {}) {
   try {
+    if (a.tipo === "video/mp4") return await tratarVideo(a, capa);
     if (!OTIMIZAVEIS.includes(a.tipo)) { await db().query("update arquivos set tratado = true where id = $1", [a.id]); return false; }
     const dados = await fs.readFile(caminho(a.org_id, a.id));
     const o = await otimizarImagem(a.tipo, dados);
@@ -60,7 +109,7 @@ const caminho = (org, id) => path.join(config.pastaArquivos, String(org), String
 export const TIPOS_ACEITOS = ["image/png", "image/jpeg", "image/webp", "image/svg+xml", "video/mp4"];
 export const LIMITE_BYTES = 25 * 1024 * 1024;
 
-export async function salvarArquivo(org, { tipo, nome, dados }) {
+export async function salvarArquivo(org, { tipo, nome, dados, capa }) {
   if (!TIPOS_ACEITOS.includes(tipo)) throw Object.assign(new Error("Tipo de arquivo não aceito."), { status: 400 });
   if (dados.length > LIMITE_BYTES) throw Object.assign(new Error("Arquivo grande demais (máximo 25 MB)."), { status: 400 });
   const chave = segredoCurto();
@@ -70,7 +119,7 @@ export async function salvarArquivo(org, { tipo, nome, dados }) {
   const id = rows[0].id;
   await fs.mkdir(path.dirname(caminho(org, id)), { recursive: true });
   await fs.writeFile(caminho(org, id), dados);
-  await tratarArquivo({ id, org_id: org, tipo });
+  await tratarArquivo({ id, org_id: org, tipo }, { capa });
   return id;
 }
 
@@ -90,6 +139,16 @@ export async function lerArquivo(id, chave, { previa = false } = {}) {
   if (previa && a.previa) { try { return { ...a, tipo: "image/webp", dados: await fs.readFile(caminho(a.org_id, a.id) + ".p") }; } catch (e) {} }
   try { return { ...a, dados: await fs.readFile(caminho(a.org_id, a.id)) }; } catch (e) { return null; }
 }
+
+// Para mandar aos pedaços (Range): onde está no disco e o tamanho, sem ler o arquivo inteiro.
+export async function infoArquivo(id, chave, { previa = false } = {}) {
+  const { rows } = await db().query("select * from arquivos where id = $1", [id]);
+  const a = rows[0];
+  if (!a || a.chave !== chave) return null;
+  const alvo = previa && a.previa ? { arq: caminho(a.org_id, a.id) + ".p", tipo: "image/webp" } : { arq: caminho(a.org_id, a.id), tipo: a.tipo };
+  try { const st = await fs.stat(alvo.arq); return { ...a, ...alvo, tamanho: st.size }; } catch (e) { return null; }
+}
+export const lerPedaco = (arq, ini, fim) => createReadStream(arq, { start: ini, end: fim });
 
 export async function apagarArquivos(org, ids) {
   if (!ids.length) return;

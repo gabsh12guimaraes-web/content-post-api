@@ -13,6 +13,8 @@ import { usar, devolver, limiteModelos } from "../planos.js";
 const LOGOS = ["Logo", "LogoDark", "SimboloLight", "SimboloDark"];
 const STATUS_IDEIA = ["Sugerida", "Aprovada", "Descartada", "Guardada"];
 const LIMITE_AJUSTES = 3;
+// Capa de vídeo (um quadro em JPEG ou WEBP que o painel tira do próprio vídeo): opcional, até 2 MB.
+const capaDe = v => { if (typeof v !== "string" || !v.length) return undefined; const d = Buffer.from(v, "base64"); return d.length && d.length <= 2 * 1024 * 1024 ? d : undefined; };
 const doBase64 = (b64, max = 25 * 1024 * 1024) => {
   if (typeof b64 !== "string" || !b64.length) falha("Arquivo vazio.");
   const dados = Buffer.from(b64, "base64");
@@ -224,7 +226,7 @@ export const acoesPauta = {
     const total = (await db().query("select count(*)::int as n from banco_imagens where org_id = $1 and origem = 'envio'", [ctx.org])).rows[0].n;
     if (total >= 300) falha("O banco aceita até 300 arquivos enviados. Remova alguns para enviar novos.");
     const video = b.tipo === "video/mp4";
-    const arquivo = await salvarArquivo(ctx.org, { tipo: b.tipo, nome: b.nome, dados: doBase64(b.base64, (video ? 25 : 8) * 1024 * 1024) });
+    const arquivo = await salvarArquivo(ctx.org, { tipo: b.tipo, nome: b.nome, dados: doBase64(b.base64, (video ? 25 : 8) * 1024 * 1024), capa: video ? capaDe(b.capa) : undefined });
     const nome = texto(b.titulo, 80);
     const { rows } = await db().query("insert into banco_imagens (org_id, arquivo_id, nome) values ($1, $2, $3) returning id", [ctx.org, arquivo, nome]);
     // A IA descreve a foto em segundo plano (nome, descrição e etiquetas). Se não houver chave do Claude, fica para a pessoa preencher.
@@ -366,7 +368,7 @@ export const acoesPauta = {
         const a = artes[i];
         const tipo = ["image/png", "video/mp4"].includes(a.tipo) ? a.tipo : "image/jpeg";
         const ext = { "image/png": ".png", "video/mp4": ".mp4", "image/jpeg": ".jpg" }[tipo];
-        ids.push(await salvarArquivo(ctx.org, { tipo, nome: (artes.length === 1 && tipo === "video/mp4" ? "video" : "slide-" + String(i + 1).padStart(2, "0")) + ext, dados: doBase64(a.base64) }));
+        ids.push(await salvarArquivo(ctx.org, { tipo, nome: (artes.length === 1 && tipo === "video/mp4" ? "video" : "slide-" + String(i + 1).padStart(2, "0")) + ext, dados: doBase64(a.base64), capa: tipo === "video/mp4" ? capaDe(a.capa) : undefined }));
       }
     } catch (e) { await apagarArquivos(ctx.org, ids); throw e; }
     await db().query("update posts set artes = $2, artes_prontas = true, atualizado_em = now() where id = $1", [p.id, ids]);

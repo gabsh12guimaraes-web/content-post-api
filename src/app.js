@@ -7,7 +7,7 @@ import { config } from "./config.js";
 import { db } from "./db.js";
 import { hashToken } from "./cripto.js";
 import { ErroApi, UUID } from "./erros.js";
-import { lerArquivo } from "./arquivos.js";
+import { infoArquivo, lerPedaco } from "./arquivos.js";
 import { acoesConta, acoesOrg } from "./acoes/conta.js";
 import { acoesPauta } from "./acoes/pauta.js";
 import { ErroIntegracao } from "./provedores/index.js";
@@ -84,13 +84,22 @@ export async function criarApp() {
     catch (e) { console.error("[kiwify]", e); return rep.code(500).send({ ok: false }); }
   });
 
-  app.get("/f/:id/:chave", async (req, rep) => {
+  // Arquivos aos pedaços (Range): o vídeo começa a tocar com o primeiro pedaço, sem baixar o arquivo inteiro (o iPhone exige isso).
+  app.get("/f/:id/:chave", { compress: false }, async (req, rep) => {
     const { id, chave } = req.params;
     if (!UUID.test(id)) return rep.code(404).send("não encontrado");
-    const a = await lerArquivo(id, chave, { previa: req.query.v === "p" });
+    const a = await infoArquivo(id, chave, { previa: req.query.v === "p" });
     if (!a) return rep.code(404).send("não encontrado");
-    return rep.header("content-type", a.tipo).header("cache-control", "public, max-age=31536000, immutable")
-      .header("access-control-allow-origin", "*").header("content-disposition", `inline; filename="${a.nome}"`).send(a.dados);
+    rep.header("content-type", a.tipo).header("cache-control", "public, max-age=31536000, immutable").header("accept-ranges", "bytes")
+      .header("access-control-allow-origin", "*").header("access-control-expose-headers", "content-range, content-length, accept-ranges")
+      .header("content-disposition", `inline; filename="${a.nome}"`);
+    const total = a.tamanho, m = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range || "").trim());
+    if (m && (m[1] || m[2])) {
+      let ini = m[1] ? Number(m[1]) : Math.max(0, total - Number(m[2])), fim = m[1] && m[2] ? Math.min(Number(m[2]), total - 1) : total - 1;
+      if (ini >= total || ini > fim) return rep.code(416).header("content-range", `bytes */${total}`).send();
+      return rep.code(206).header("content-range", `bytes ${ini}-${fim}/${total}`).header("content-length", fim - ini + 1).send(lerPedaco(a.arq, ini, fim));
+    }
+    return rep.header("content-length", total).send(lerPedaco(a.arq, 0, Math.max(0, total - 1)));
   });
 
   app.post("/api", async (req, rep) => {
