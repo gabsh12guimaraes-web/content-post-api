@@ -152,6 +152,19 @@ export async function infoArquivo(id, chave, { previa = false } = {}) {
 }
 export const lerPedaco = (arq, ini, fim) => createReadStream(arq, { start: ini, end: fim });
 
+// Antes de publicar: vídeos das artes passam pela padronização (uma vez só). Se a conversão falhar, segue com o original.
+export async function padronizarVideosDe(org, ids) {
+  const { padronizarVideo } = await import("./video.js");
+  const { rows } = await db().query("select id, org_id from arquivos where org_id = $1 and id = any($2::uuid[]) and tipo = 'video/mp4' and not padronizado", [org, ids || []]);
+  for (const a of rows) {
+    try {
+      const t0 = Date.now(), tamanho = await padronizarVideo(caminho(a.org_id, a.id));
+      await db().query("update arquivos set padronizado = true, tamanho = $2 where id = $1", [a.id, tamanho]);
+      console.log(`[video] ${a.id} padronizado em ${Math.round((Date.now() - t0) / 1000)} s (${(tamanho / 1048576).toFixed(1)} MB)`);
+    } catch (e) { console.error(`[video] ${a.id} não converteu: ${e.message}`); }
+  }
+}
+
 export async function apagarArquivos(org, ids) {
   if (!ids.length) return;
   const { rows } = await db().query("delete from arquivos where org_id = $1 and id = any($2::uuid[]) and id not in (select arquivo_id from banco_imagens where org_id = $1) returning id", [org, ids]);

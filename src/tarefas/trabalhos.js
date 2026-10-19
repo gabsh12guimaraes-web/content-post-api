@@ -1,7 +1,7 @@
 // O que antes rodava nos fluxos 01 (ideias), 03 e 05 (criação), 04 (ajuste) e 06 (publicação) do n8n.
 import { db } from "../db.js";
 import { claude, gerarFoto, gerarFotoComPessoa, gerarClipe, coletarApify, publicarZernio, chaveDe, ErroIntegracao } from "../provedores/index.js";
-import { guardarDeUrl, apagarArquivos, anexos } from "../arquivos.js";
+import { guardarDeUrl, apagarArquivos, anexos, padronizarVideosDe } from "../arquivos.js";
 import { registrar } from "./fila.js";
 import { SISTEMA_IDEIAS, SISTEMA_POST, SISTEMA_AJUSTE, SISTEMA_ESCOLHA_BANCO, SISTEMA_MODELO, idiomaDe, briefingTexto } from "./prompts.js";
 import { devolver } from "../planos.js";
@@ -447,6 +447,8 @@ export async function publicarJa(org, id) {
 const pendente = v => typeof v === "string" && v.startsWith("zernio:");
 async function publicarPost(p) {
   try {
+    // vídeo no padrão do Instagram (H.264, 30 fps, AAC, índice no começo) antes de mandar para o Zernio
+    await padronizarVideosDe(p.org_id, p.artes || []);
     const a = await anexos(p.org_id, p.artes || []);
     const midias = (p.artes || []).map(id => a.get(id)).filter(Boolean).map(x => ({ type: String(x.type).startsWith("video/") ? "video" : "image", url: x.url }));
     // Uma publicação por rede: se uma falhar, as outras seguem.
