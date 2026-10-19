@@ -1146,3 +1146,15 @@ test("tentar de novo: post com erro de publicação volta a publicar só o que f
   assert.deepEqual(criados, ["facebook"], "o Instagram, que já tinha saído, não foi repetido");
   assert.equal(p.links.Facebook, "https://facebook.com/p/novo");
 });
+
+test("pauta responde só 'igual' quando nada mudou desde a versão do painel", async () => {
+  const a = await chamar({ acao: "pauta" }, ana);
+  assert.equal(a.status, 200); assert.ok(a.versao); assert.ok(Array.isArray(a.posts));
+  const b = await chamar({ acao: "pauta", versao: a.versao }, ana);
+  assert.equal(b.igual, true); assert.equal(b.posts, undefined);
+  const i = (await db().query("select id from ideias where org_id = $1 limit 1", [anaOrg])).rows[0];
+  if (i) await db().query("update ideias set status = 'Guardada' where id = $1", [i.id]);
+  else await db().query("insert into ideias (org_id, titulo) values ($1, 'nova')", [anaOrg]);
+  const c = await chamar({ acao: "pauta", versao: a.versao }, ana);
+  assert.equal(c.igual, undefined); assert.notEqual(c.versao, a.versao); assert.ok(Array.isArray(c.ideias));
+});

@@ -168,12 +168,24 @@ const cabecalho = z => ({ authorization: `Bearer ${z.chave}` });
 const motivoZernio = r => String((r.json && (r.json.error || r.json.message)) || r.txt || r.status).slice(0, 300);
 const perfilDaConta = c => String((c.profileId && c.profileId._id) || c.profileId || "");
 // Contas que a organização pode usar. No modo plataforma, só as do profile dela: filtradas no pedido e conferidas aqui de novo.
-async function contasZernio(z) {
+// A lista fica guardada por 2 minutos: o painel pergunta a cada abertura e o Zernio às vezes demora (já levou 2 min e caiu).
+// fresco: publicar, desconectar e a tela de Integrações perguntam de novo, mas usam a última lista boa se o Zernio não responder.
+const CONTAS = new Map(), CONTAS_MS = 2 * 60000;
+async function contasZernio(z, { fresco = false } = {}) {
   if (z.modo === "plataforma" && !z.perfil) return { ok: true, status: 200, contas: [] };
-  const r = await pedir(`${ZERNIO}/accounts${z.perfil ? "?profileId=" + encodeURIComponent(z.perfil) : ""}`, { headers: cabecalho(z) });
-  if (!r.ok) return { ok: false, status: r.status, contas: [] };
+  const k = z.chave + "|" + (z.perfil || ""), guardada = CONTAS.get(k);
+  if (!fresco && guardada && Date.now() - guardada.t < CONTAS_MS) return guardada.r;
+  let r;
+  try { r = await pedir(`${ZERNIO}/accounts${z.perfil ? "?profileId=" + encodeURIComponent(z.perfil) : ""}`, { headers: cabecalho(z) }, 15000); }
+  catch (e) {
+    console.error("[zernio] contas:", e.name === "AbortError" ? "sem resposta em 15 s" : e.message);
+    return guardada ? guardada.r : { ok: false, status: 0, contas: [] };
+  }
+  if (!r.ok) return r.status >= 500 && guardada ? guardada.r : { ok: false, status: r.status, contas: [] };
   const todas = (r.json && r.json.accounts) || [];
-  return { ok: true, status: r.status, contas: z.perfil ? todas.filter(c => perfilDaConta(c) === z.perfil) : todas };
+  const res = { ok: true, status: r.status, contas: z.perfil ? todas.filter(c => perfilDaConta(c) === z.perfil) : todas };
+  CONTAS.set(k, { t: Date.now(), r: res });
+  return res;
 }
 export async function redesConectadas(org) {
   let z; try { z = await zernioDe(org); } catch (e) { return null; }
@@ -184,7 +196,7 @@ export async function redesConectadas(org) {
 // Lista da seção "Redes conectadas" do painel. modo null = a organização ainda não tem como publicar.
 export async function contasConectadas(org) {
   let z; try { z = await zernioDe(org); } catch (e) { return { modo: null, contas: [], aviso: e.message }; }
-  const r = await contasZernio(z);
+  const r = await contasZernio(z, { fresco: true });
   if (!r.ok) return { modo: z.modo, contas: [], aviso: z.modo === "propria" ? "O Zernio recusou a chave. Confira em Integrações." : "Não consegui falar com o Zernio agora." };
   const contas = r.contas.filter(c => NOMES_REDE[c.platform]).map(c => ({
     id: c._id, rede: NOMES_REDE[c.platform], usuario: c.username || "", nome: c.displayName || "",
@@ -229,7 +241,7 @@ export async function linkConexao(org, nomeRede, voltar) {
 export async function desconectarConta(org, id) {
   const z = await zernioDe(org);
   if (z.modo !== "plataforma") throw new ErroIntegracao(SO_PELA_PROPRIA);
-  const { contas } = await contasZernio(z);
+  const { contas } = await contasZernio(z, { fresco: true });
   if (!contas.some(c => c._id === id)) throw new ErroIntegracao("Esta conta não está conectada nesta organização.");
   const r = await pedir(`${ZERNIO}/accounts/${encodeURIComponent(id)}`, { method: "DELETE", headers: cabecalho(z) });
   if (!r.ok && r.status !== 404) throw new ErroIntegracao("O Zernio não desconectou a conta: " + motivoZernio(r));
@@ -240,7 +252,7 @@ export async function desconectarConta(org, id) {
 export async function publicarZernio(org, { rede, midias, legenda, opcoes, chave: idPedido, idExistente = null, aoCriar = null }) {
   const z = await zernioDe(org);
   const h = { "content-type": "application/json", ...cabecalho(z) };
-  const contas = await contasZernio(z);
+  const contas = await contasZernio(z, { fresco: true });
   if (contas.status === 401 || contas.status === 403) return { ok: false, erro: z.modo === "propria" ? "o Zernio recusou a chave. Confira em Integrações." : "o Zernio recusou o pedido da plataforma. Avise o suporte." };
   const conta = contas.contas.find(c => c.platform === rede && c.isActive !== false);
   if (!conta) return { ok: false, erro: z.modo === "plataforma" ? `nenhuma conta de ${NOMES_REDE[rede] || rede || "rede"} conectada. Conecte em Integrações › Redes conectadas` : `nenhuma conta de ${rede || "rede"} conectada no Zernio` };

@@ -1,4 +1,5 @@
 // Marca, fontes, ideias e calendário da organização selecionada.
+import crypto from "node:crypto";
 import { db } from "../db.js";
 import { falha, exigirId, texto, UUID } from "../erros.js";
 import { salvarArquivo, guardarDeUrl, apagarArquivos, anexos } from "../arquivos.js";
@@ -301,13 +302,16 @@ export const acoesPauta = {
     return {};
   },
 
-  async pauta(ctx) {
+  async pauta(ctx, b) {
     const ideias = (await db().query("select * from ideias where org_id = $1 and criada_em > now() - interval '90 days' order by score desc limit 300", [ctx.org])).rows;
     const posts = (await db().query("select * from posts where org_id = $1 and data_publicacao > now() - interval '60 days' order by data_publicacao limit 500", [ctx.org])).rows;
     const porIdeia = {};
     for (const p of posts) if (p.ideia_id) (porIdeia[p.ideia_id] ||= []).push(p.id);
     const tarefas = (await db().query("select id, tipo, status, payload - 'token' as payload, erro, criado_em, terminado_em from tarefas where org_id = $1 and criado_em > now() - interval '1 day' order by criado_em desc limit 30", [ctx.org])).rows;
-    return { ideias: ideias.map(i => ideiaParaPainel(i, porIdeia[i.id] || [])), posts: await postsParaPainel(ctx.org, posts), tarefas };
+    const corpo = { ideias: ideias.map(i => ideiaParaPainel(i, porIdeia[i.id] || [])), posts: await postsParaPainel(ctx.org, posts), tarefas };
+    // O painel recarrega a pauta a cada 90 s: se nada mudou desde a versão que ele tem, responde só "igual" (poupa ~1 MB e o redesenho).
+    const versao = crypto.createHash("sha1").update(JSON.stringify(corpo)).digest("base64url");
+    return b && b.versao === versao ? { igual: true, versao } : { ...corpo, versao };
   },
 
   async salvarIdeia(ctx, b) {

@@ -115,7 +115,8 @@ export async function criarApp() {
         if (!ctx) throw new ErroApi("Sua sessão expirou. Entre de novo.", 401, { login: true });
         if (!SEM_ORG.has(acao) && !ctx.org) throw new ErroApi("Crie uma organização ou aceite um convite para começar.", 409, { semOrganizacao: true });
       }
-      const r = await fn(ctx, b);
+      const t0 = Date.now(), r = await fn(ctx, b), ms = Date.now() - t0;
+      if (ms > 3000) console.log(`[lento] ${acao} ${(ms / 1000).toFixed(1)} s`); // para achar o que pesa no uso real
       return { ok: true, ...(r || {}) };
     } catch (e) {
       if (e instanceof ErroApi) return rep.code(e.status).send({ ok: false, erro: e.message, ...e.extra });
