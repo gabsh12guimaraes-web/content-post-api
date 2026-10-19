@@ -486,11 +486,13 @@ async function publicarPost(p) {
       } catch (e) { falhas.push(`${nome}: ${String(e.message || e).slice(0, 200)}`); }
       await anotar();
     }
+    if (falhas.length) console.error(`[publicar] post ${p.id} (${p.formato}): ${falhas.join(" · ").slice(0, 900)}`);
     const saiu = Object.values(links).some(v => !pendente(v));
     const primeiro = Object.values(links).find(l => /^https?:/.test(l)) || null;
     await db().query("update posts set status = $2, link_publicado = $3, id_agendamento = $4, erro = $5, links = $6, atualizado_em = now() where id = $1",
       [p.id, saiu ? "Publicado" : "Erro", primeiro, ids.join(","), falhas.length ? (saiu ? "Não publicou em " : "Falhou ao publicar em ") + falhas.join(" · ").slice(0, 700) : null, JSON.stringify(links)]);
   } catch (e) {
+    console.error(`[publicar] post ${p.id}:`, e);
     await db().query("update posts set status = 'Erro', erro = $2, atualizado_em = now() where id = $1", [p.id, "Falhou ao publicar: " + String(e.message).slice(0, 400)]);
   }
 }

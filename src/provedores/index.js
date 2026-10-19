@@ -256,7 +256,7 @@ export async function publicarZernio(org, { rede, midias, legenda, opcoes, chave
       body: JSON.stringify({ content: legenda, mediaItems: midias.slice(0, 10), platforms: [destino], publishNow: true }),
     }, 300000);
     ({ post, p } = ler(r.json));
-    if (!post._id) return { ok: false, erro: "o Zernio recusou o post: " + String((r.json && (r.json.error || r.json.message)) || r.txt).slice(0, 300) };
+    if (!post._id) { console.error(`[zernio] ${rede} recusou: ${String((r.json && (r.json.error || r.json.message)) || r.txt).slice(0, 400)}`); return { ok: false, erro: "o Zernio recusou o post: " + String((r.json && (r.json.error || r.json.message)) || r.txt).slice(0, 300) }; }
     await registrarConsumo(org, "zernio", { tipo: "publicacao", quantidade: 1 });
     if (aoCriar) await aoCriar(post._id);
   }
@@ -268,7 +268,9 @@ export async function publicarZernio(org, { rede, midias, legenda, opcoes, chave
     if (!post._id) break;
   }
   const ok = post.status === "published" || p.status === "published";
-  return { ok, link: p.platformPostUrl || null, id: post._id || "", erro: ok ? "" : String(p.errorMessage || "o Zernio não confirmou a publicação").slice(0, 400) };
+  // Registro para diagnóstico: o que o Zernio respondeu quando não confirmou a publicação.
+  if (!ok) console.error(`[zernio] ${rede} post ${post._id || "?"} status=${post.status || "?"}/${p.status || "?"} erro=${String(p.errorMessage || p.error || post.error || "").slice(0, 300)}`);
+  return { ok, link: p.platformPostUrl || null, id: post._id || "", erro: ok ? "" : String(p.errorMessage || (["publishing", "processing", "pending", "scheduled"].includes(p.status || post.status) ? "o Zernio ainda está processando o post (vídeos podem demorar). Tente de novo em alguns minutos" : "o Zernio não confirmou a publicação")).slice(0, 400) };
 }
 
 /* ---------- teste das chaves (não gasta créditos) ---------- */
