@@ -421,6 +421,17 @@ export const acoesPauta = {
     await db().query("update posts set redes = $2, atualizado_em = now() where id = $1", [p.id, redes]);
     return { redes };
   },
+  // Opções de publicação: Reels de teste no Instagram (só para quem não segue; "MANUAL" ou "SS_PERFORMANCE" = compartilha
+  // sozinho com os seguidores se for bem) e o selo de conteúdo feito com IA.
+  async salvarPublicacao(ctx, b) {
+    const p = await postDaOrg(ctx.org, b.id);
+    if (["Publicando", "Publicado"].includes(p.status)) falha("Este post já foi publicado.");
+    const pub = { ...(p.publicacao || {}) };
+    if (b.reelTeste !== undefined) { if (["MANUAL", "SS_PERFORMANCE"].includes(b.reelTeste)) pub.reelTeste = b.reelTeste; else delete pub.reelTeste; }
+    if (b.conteudoIa !== undefined) pub.conteudoIa = !!b.conteudoIa;
+    await db().query("update posts set publicacao = $2, atualizado_em = now() where id = $1", [p.id, JSON.stringify(pub)]);
+    return { publicacao: pub };
+  },
   // Redes com conta conectada no Zernio da organização (o painel mostra só o que dá para usar).
   async redesConectadas(ctx) { return { redes: await redesConectadas(ctx.org) }; },
 

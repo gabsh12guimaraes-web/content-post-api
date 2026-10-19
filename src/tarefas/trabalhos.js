@@ -392,8 +392,17 @@ export function conteudoPara(nome, p, midias) {
   const videos = midias.filter(m => m.type === "video"), imagens = midias.filter(m => m.type === "image");
   const story = p.formato === "Stories";
   if (story && !["Instagram", "Facebook"].includes(nome)) return { erro: "Stories só vão para o Instagram e o Facebook" };
+  // Selo de IA: ligado por padrão (as artes são feitas com IA); a pessoa pode desmarcar na revisão.
+  const pub = p.publicacao || {}, ia = pub.conteudoIa !== false;
   switch (nome) {
-    case "Instagram": return { midias: story ? midias.slice(0, 10) : midias, legenda: story ? "" : legenda, opcoes: story ? { contentType: "story" } : null };
+    case "Instagram": {
+      if (story) return { midias: midias.slice(0, 10), legenda: "", opcoes: { contentType: "story" } };
+      const op = {};
+      // Reels de teste: só um vídeo, no formato Reels; aparece primeiro para quem não segue o perfil.
+      if (p.formato === "Reels" && pub.reelTeste && videos.length === 1 && !imagens.length) op.trialParams = { graduationStrategy: pub.reelTeste };
+      if (ia) op.isAiGenerated = true;
+      return { midias, legenda, opcoes: Object.keys(op).length ? op : null };
+    }
     case "Facebook": {
       // Story: cada mídia sai como um story separado, então fotos e vídeos podem se misturar.
       if (story) return { midias: midias.slice(0, 10), legenda: "", opcoes: { contentType: "story" } };
@@ -406,11 +415,11 @@ export function conteudoPara(nome, p, midias) {
     case "TikTok": {
       // A pessoa revisa a prévia e aprova no painel antes de publicar; as artes são feitas com IA.
       const base = { privacy_level: "PUBLIC_TO_EVERYONE", allow_comment: true, content_preview_confirmed: true, express_consent_given: true };
-      if (videos.length) return { midias: videos.slice(0, 1), legenda: cortar(legenda, 2200), opcoes: { tiktokSettings: { ...base, allow_duet: true, allow_stitch: true, video_made_with_ai: true } } };
+      if (videos.length) return { midias: videos.slice(0, 1), legenda: cortar(legenda, 2200), opcoes: { tiktokSettings: { ...base, allow_duet: true, allow_stitch: true, video_made_with_ai: ia } } };
       if (imagens.length) return { midias: imagens.slice(0, 35), legenda: cortar(p.titulo, 90), opcoes: { tiktokSettings: { ...base, media_type: "photo", photo_cover_index: 0, description: cortar(legenda, 4000), auto_add_music: true } } };
       return { erro: "o TikTok precisa de vídeo ou fotos" };
     }
-    case "YouTube": return videos.length ? { midias: videos.slice(0, 1), legenda, opcoes: { title: cortar(p.titulo, 100), visibility: "public" } } : { erro: "o YouTube precisa de vídeo" };
+    case "YouTube": return videos.length ? { midias: videos.slice(0, 1), legenda, opcoes: { title: cortar(p.titulo, 100), visibility: "public", containsSyntheticMedia: ia } } : { erro: "o YouTube precisa de vídeo" };
     default: return { midias, legenda, opcoes: null };
   }
 }

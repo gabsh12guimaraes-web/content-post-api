@@ -255,7 +255,7 @@ test("buscar ideias guarda o pedido; mudar data e publicar agora", async () => {
   const p = (await db().query("select status, link_publicado from posts where id = $1", [id])).rows[0];
   assert.equal(p.status, "Publicado");
   assert.equal(p.link_publicado, "https://instagram.com/p/teste");
-  assert.deepEqual(corpoZernio.platforms, [{ platform: "instagram", accountId: "acc1" }]);
+  assert.deepEqual(corpoZernio.platforms, [{ platform: "instagram", accountId: "acc1", platformSpecificData: { isAiGenerated: true } }]);
   assert.equal(corpoZernio.publishNow, true);
   assert.deepEqual(corpoZernio.mediaItems.map(m => m.type), ["image"]);
 });
@@ -506,7 +506,7 @@ test("redes conectadas: um profile do Zernio por organização e cada uma public
     assert.equal((await chamar({ acao: "publicarAgora", id }, fabio)).status, 200);
     for (let k = 0; k < 100; k++) { if ((await db().query("select status from posts where id = $1", [id])).rows[0].status !== "Publicando") break; await new Promise(r => setTimeout(r, 30)); }
     assert.equal((await db().query("select status from posts where id = $1", [id])).rows[0].status, "Publicado");
-    assert.deepEqual(corpoPost.platforms, [{ platform: "instagram", accountId: "ig-fabio" }]);
+    assert.deepEqual(corpoPost.platforms, [{ platform: "instagram", accountId: "ig-fabio", platformSpecificData: { isAiGenerated: true } }]);
 
     // Desconectar: só contas da própria organização; editor não pode.
     assert.equal((await chamar({ acao: "desconectarRede", conta: "x-gil" }, fabio)).status, 400);
@@ -1026,4 +1026,25 @@ test("modelo montado à mão: salva a diagramação, vira padrão, edita e respe
     l = await chamar({ acao: "listarModelos" }, tk);
     assert.equal(l.modelos[0].nome, "Promo 2"); assert.equal(l.modelos[0].diag.fonte, "anton");
   } finally { delete process.env.COBRANCA; }
+});
+
+test("publicação: Reels de teste no Instagram e selo de conteúdo feito com IA", async () => {
+  const { conteudoPara } = await import("../src/tarefas/trabalhos.js");
+  const v = [{ type: "video", url: "https://x/v.mp4" }], f = [{ type: "image", url: "https://x/a.jpg" }];
+  const reel = { formato: "Reels", legenda: "L", hashtags: "", titulo: "T", publicacao: { reelTeste: "SS_PERFORMANCE" } };
+  assert.deepEqual(conteudoPara("Instagram", reel, v).opcoes, { trialParams: { graduationStrategy: "SS_PERFORMANCE" }, isAiGenerated: true });
+  // carrossel não vira Reels de teste; selo de IA pode ser desligado
+  assert.deepEqual(conteudoPara("Instagram", { ...reel, formato: "Carrossel" }, f).opcoes, { isAiGenerated: true });
+  assert.equal(conteudoPara("Instagram", { ...reel, publicacao: { conteudoIa: false } }, v).opcoes, null);
+  assert.equal(conteudoPara("TikTok", { ...reel, publicacao: { conteudoIa: false } }, v).opcoes.tiktokSettings.video_made_with_ai, false);
+  assert.equal(conteudoPara("YouTube", reel, v).opcoes.containsSyntheticMedia, true);
+  // salvar no post e voltar na pauta
+  const i = (await db().query("insert into ideias (org_id, titulo, formato, rede, score) values ($1, 'Reel teste', 'Reels', 'Instagram', 7) returning id", [anaOrg])).rows[0].id;
+  const { id } = await chamar({ acao: "agendarIdeia", id: i, data: new Date(Date.now() + 8 * 86400000).toISOString() }, ana);
+  assert.equal((await chamar({ acao: "salvarPublicacao", id, reelTeste: "MANUAL", conteudoIa: false }, ana)).status, 200);
+  let post = (await chamar({ acao: "pauta" }, ana)).posts.find(p => p.id === id);
+  assert.deepEqual(post.Publicacao, { reelTeste: "MANUAL", conteudoIa: false });
+  await chamar({ acao: "salvarPublicacao", id, reelTeste: "nao" }, ana);
+  post = (await chamar({ acao: "pauta" }, ana)).posts.find(p => p.id === id);
+  assert.deepEqual(post.Publicacao, { conteudoIa: false });
 });
