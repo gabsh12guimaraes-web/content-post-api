@@ -1080,3 +1080,43 @@ test("vídeos: índice vai para o começo, capa vira prévia e o arquivo sai aos
   const pv = await app.inject({ method: "GET", url: url + "?v=p" });
   assert.equal(pv.headers["content-type"], "image/webp");
 });
+
+test("publicação: reinício no meio não cria o post de novo no Zernio, e vários posts vencidos saem juntos", async () => {
+  const { publicarVencidos, destravarPublicando } = await import("../src/tarefas/trabalhos.js");
+  await chamar({ acao: "salvarIntegracao", provedor: "zernio", valor: "sk_zernio_teste_1234" }, ana);
+  const novo = async (t, links) => {
+    const i = (await db().query("insert into ideias (org_id, titulo, formato, rede, score) values ($1, $2, 'Estatico', 'Instagram', 7) returning id", [anaOrg, t])).rows[0].id;
+    const { id } = await chamar({ acao: "agendarIdeia", id: i, data: new Date(Date.now() + 5 * 86400000).toISOString() }, ana);
+    await chamar({ acao: "salvarArtes", id, artes: [{ tipo: "image/jpeg", base64: JPG }] }, ana);
+    await db().query("update posts set status = $2, links = $3, data_publicacao = now() - interval '1 minute', redes = '{Instagram}' where id = $1", [id, links ? "Publicando" : "Agendado", JSON.stringify(links || {})]);
+    return id;
+  };
+  // um post ficou "Publicando" quando o servidor caiu, já com o id do Zernio guardado; outros três estão vencidos
+  const preso = await novo("Preso no reinício", { Instagram: "zernio:zpreso" });
+  const outros = [await novo("Vencido 1"), await novo("Vencido 2"), await novo("Vencido 3")];
+  const original = globalThis.fetch, criados = [];
+  let simultaneos = 0, maxSimultaneos = 0, n = 0;
+  process.env.ZERNIO_INTERVALO_MS = "20";
+  globalThis.fetch = async (url, op = {}) => {
+    const u = String(url);
+    if (u.endsWith("zernio.com/api/v1/accounts")) return new Response(JSON.stringify({ accounts: [{ _id: "acc1", platform: "instagram", username: "x", isActive: true }] }));
+    if (u.endsWith("zernio.com/api/v1/posts") && op.method === "POST") {
+      const id = "z" + (++n); criados.push(id); simultaneos++; maxSimultaneos = Math.max(maxSimultaneos, simultaneos);
+      return new Response(JSON.stringify({ post: { _id: id, status: "publishing", platforms: [{ status: "publishing" }] } }));
+    }
+    const m = u.match(/zernio\.com\/api\/v1\/posts\/(\w+)$/);
+    if (m) { await new Promise(r => setTimeout(r, 30)); if (m[1] !== "zpreso") simultaneos--; return new Response(JSON.stringify({ post: { _id: m[1], status: "published", platforms: [{ status: "published", platformPostUrl: "https://instagram.com/p/" + m[1] }] } })); }
+    return original(url, op);
+  };
+  try {
+    await destravarPublicando(0);
+    assert.equal((await db().query("select status from posts where id = $1", [preso])).rows[0].status, "Agendado", "volta para a fila ao ligar");
+    await publicarVencidos();
+  } finally { globalThis.fetch = original; }
+  const p = (await db().query("select status, link_publicado from posts where id = $1", [preso])).rows[0];
+  assert.equal(p.status, "Publicado");
+  assert.equal(p.link_publicado, "https://instagram.com/p/zpreso", "conferiu o post que já existia");
+  assert.equal(criados.length, 3, "só os 3 novos foram criados no Zernio");
+  assert.ok(maxSimultaneos >= 2, "os vencidos saem ao mesmo tempo, não um por um");
+  for (const id of outros) assert.equal((await db().query("select status from posts where id = $1", [id])).rows[0].status, "Publicado");
+});

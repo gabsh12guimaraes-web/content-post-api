@@ -233,7 +233,9 @@ export async function desconectarConta(org, id) {
   if (!r.ok && r.status !== 404) throw new ErroIntegracao("O Zernio não desconectou a conta: " + motivoZernio(r));
 }
 // Publica na hora: acha a conta da rede, cria o post com publishNow e acompanha até publicar ou falhar.
-export async function publicarZernio(org, { rede, midias, legenda, opcoes, chave: idPedido }) {
+// idExistente: post já criado no Zernio numa tentativa anterior (só confere o resultado, não cria outro).
+// aoCriar(id): chamado assim que o Zernio aceita o post, para guardar o id antes de esperar a confirmação.
+export async function publicarZernio(org, { rede, midias, legenda, opcoes, chave: idPedido, idExistente = null, aoCriar = null }) {
   const z = await zernioDe(org);
   const h = { "content-type": "application/json", ...cabecalho(z) };
   const contas = await contasZernio(z);
@@ -241,16 +243,23 @@ export async function publicarZernio(org, { rede, midias, legenda, opcoes, chave
   const conta = contas.contas.find(c => c.platform === rede && c.isActive !== false);
   if (!conta) return { ok: false, erro: z.modo === "plataforma" ? `nenhuma conta de ${NOMES_REDE[rede] || rede || "rede"} conectada. Conecte em Integrações › Redes conectadas` : `nenhuma conta de ${rede || "rede"} conectada no Zernio` };
   if (!midias.length) return { ok: false, erro: "o post não tem artes finais" };
-  const destino = { platform: rede, accountId: conta._id };
-  if (opcoes) destino.platformSpecificData = opcoes;
-  const r = await pedir(`${ZERNIO}/posts`, {
-    method: "POST", headers: { ...h, "x-request-id": idPedido },
-    body: JSON.stringify({ content: legenda, mediaItems: midias.slice(0, 10), platforms: [destino], publishNow: true }),
-  }, 300000);
   const ler = j => { const post = (j && j.post) || {}; const p = (post.platforms || [])[0] || {}; return { post, p }; };
-  let { post, p } = ler(r.json);
-  if (!post._id) return { ok: false, erro: "o Zernio recusou o post: " + String((r.json && (r.json.error || r.json.message)) || r.txt).slice(0, 300) };
-  await registrarConsumo(org, "zernio", { tipo: "publicacao", quantidade: 1 });
+  let post, p;
+  if (idExistente) {
+    ({ post, p } = ler((await pedir(`${ZERNIO}/posts/${idExistente}`, { headers: h })).json));
+    if (!post._id) return { ok: false, erro: "não achei no Zernio o post enviado antes", sumiu: true };
+  } else {
+    const destino = { platform: rede, accountId: conta._id };
+    if (opcoes) destino.platformSpecificData = opcoes;
+    const r = await pedir(`${ZERNIO}/posts`, {
+      method: "POST", headers: { ...h, "x-request-id": idPedido },
+      body: JSON.stringify({ content: legenda, mediaItems: midias.slice(0, 10), platforms: [destino], publishNow: true }),
+    }, 300000);
+    ({ post, p } = ler(r.json));
+    if (!post._id) return { ok: false, erro: "o Zernio recusou o post: " + String((r.json && (r.json.error || r.json.message)) || r.txt).slice(0, 300) };
+    await registrarConsumo(org, "zernio", { tipo: "publicacao", quantidade: 1 });
+    if (aoCriar) await aoCriar(post._id);
+  }
   const intervalo = Number(process.env.ZERNIO_INTERVALO_MS) || 15000; // os testes encurtam a espera
   for (let k = 0; k < 40 && !["published", "failed", "partial"].includes(post.status); k++) {
     await esperar(intervalo);

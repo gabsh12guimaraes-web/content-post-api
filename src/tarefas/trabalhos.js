@@ -432,7 +432,9 @@ export async function publicarVencidos() {
   const { rows } = await db().query(`update posts set status = 'Publicando', atualizado_em = now()
     where id in (select id from posts where status = 'Agendado' and artes_prontas and data_publicacao <= now() + interval '1 minute' order by data_publicacao limit 10 for update skip locked)
     returning *`);
-  for (const p of rows) await publicarPost(p);
+  // Vários ao mesmo tempo (cada um pode esperar minutos pela confirmação do Zernio); até 4 por vez.
+  const fila = rows.slice();
+  await Promise.all(Array.from({ length: Math.min(4, fila.length) }, async () => { while (fila.length) await publicarPost(fila.shift()); }));
 }
 // "Publicar agora" do painel: só posts Agendados com as artes prontas.
 export async function publicarJa(org, id) {
@@ -441,18 +443,29 @@ export async function publicarJa(org, id) {
   if (rows[0]) setImmediate(() => publicarPost(rows[0]).catch(e => console.error("[publicar]", e)));
   return !!rows[0];
 }
+// Uma rede (ou uma tela da sequência de stories) já resolvida? "zernio:<id>" = enviada, esperando o Zernio confirmar.
+const pendente = v => typeof v === "string" && v.startsWith("zernio:");
 async function publicarPost(p) {
-  {
-    try {
-      const a = await anexos(p.org_id, p.artes || []);
-      const midias = (p.artes || []).map(id => a.get(id)).filter(Boolean).map(x => ({ type: String(x.type).startsWith("video/") ? "video" : "image", url: x.url }));
-      // Uma publicação por rede: se uma falhar, as outras seguem.
-      const redes = (p.redes && p.redes.length ? p.redes : [p.rede]).filter(r => REDES[r]);
-      if (!redes.length) throw new Error("escolha pelo menos uma rede para publicar");
-      const links = { ...(p.links || {}) }, falhas = [], ids = [];
-      for (const nome of redes) {
-        if (links[nome]) continue; // já saiu nessa rede numa tentativa anterior
-        try {
+  try {
+    const a = await anexos(p.org_id, p.artes || []);
+    const midias = (p.artes || []).map(id => a.get(id)).filter(Boolean).map(x => ({ type: String(x.type).startsWith("video/") ? "video" : "image", url: x.url }));
+    // Uma publicação por rede: se uma falhar, as outras seguem.
+    const redes = (p.redes && p.redes.length ? p.redes : [p.rede]).filter(r => REDES[r]);
+    if (!redes.length) throw new Error("escolha pelo menos uma rede para publicar");
+    const links = { ...(p.links || {}) }, falhas = [], ids = [];
+    const anotar = () => db().query("update posts set links = $2, atualizado_em = now() where id = $1", [p.id, JSON.stringify(links)]);
+    // Publica uma peça; o id do Zernio fica guardado assim que ele aceita, então uma nova tentativa (ex.: depois de um
+    // reinício do servidor) só confere esse post em vez de criar outro igual.
+    const enviar = async (k, pedido) => {
+      const idExistente = pendente(links[k]) ? links[k].slice(7) : null;
+      const r = await publicarZernio(p.org_id, { ...pedido, idExistente, aoCriar: async id => { links[k] = "zernio:" + id; await anotar(); } });
+      if (r.id) ids.push(r.id);
+      if (r.ok) links[k] = r.link || "publicado"; else delete links[k];
+      return r;
+    };
+    for (const nome of redes) {
+      if (links[nome] && !pendente(links[nome])) continue; // já saiu nessa rede numa tentativa anterior
+      try {
         const c = conteudoPara(nome, p, midias);
         if (c.erro) { falhas.push(`${nome}: ${c.erro}`); continue; }
         if (p.formato === "Stories" && c.midias.length > 1) {
@@ -460,28 +473,24 @@ async function publicarPost(p) {
           let tudo = true;
           for (const [k, m] of c.midias.entries()) {
             const parte = `${nome} · story ${k + 1}`;
-            if (links[parte]) continue;
-            const r = await publicarZernio(p.org_id, { rede: REDES[nome], midias: [m], legenda: "", opcoes: c.opcoes, chave: `pauta-${p.id}-${p.versao}-${REDES[nome]}-${k + 1}` });
-            if (r.id) ids.push(r.id);
-            if (r.ok) links[parte] = r.link || "publicado"; else { tudo = false; falhas.push(`${parte}: ${r.erro}`); break; }
+            if (links[parte] && !pendente(links[parte])) continue;
+            const r = await enviar(parte, { rede: REDES[nome], midias: [m], legenda: "", opcoes: c.opcoes, chave: `pauta-${p.id}-${p.versao}-${REDES[nome]}-${k + 1}` });
+            if (!r.ok) { tudo = false; falhas.push(`${parte}: ${r.erro}`); break; }
           }
           if (tudo) { links[nome] = links[`${nome} · story 1`]; c.midias.forEach((_, k) => delete links[`${nome} · story ${k + 1}`]); }
-          await db().query("update posts set links = $2, atualizado_em = now() where id = $1", [p.id, JSON.stringify(links)]);
+          await anotar();
           continue;
         }
-        const r = await publicarZernio(p.org_id, { rede: REDES[nome], midias: c.midias, legenda: c.legenda, opcoes: c.opcoes, chave: `pauta-${p.id}-${p.versao}-${REDES[nome]}` });
-        if (r.id) ids.push(r.id);
-        if (r.ok) links[nome] = r.link || "publicado"; else falhas.push(`${nome}: ${r.erro}`);
-        } catch (e) { falhas.push(`${nome}: ${String(e.message || e).slice(0, 200)}`); }
-        // Anota a cada rede: se o servidor cair no meio, uma nova tentativa não repete o que já saiu.
-        await db().query("update posts set links = $2, atualizado_em = now() where id = $1", [p.id, JSON.stringify(links)]);
-      }
-      const saiu = Object.keys(links).length > 0;
-      const primeiro = Object.values(links).find(l => /^https?:/.test(l)) || null;
-      await db().query("update posts set status = $2, link_publicado = $3, id_agendamento = $4, erro = $5, links = $6, atualizado_em = now() where id = $1",
-        [p.id, saiu ? "Publicado" : "Erro", primeiro, ids.join(","), falhas.length ? (saiu ? "Não publicou em " : "Falhou ao publicar em ") + falhas.join(" · ").slice(0, 700) : null, JSON.stringify(links)]);
-    } catch (e) {
-      await db().query("update posts set status = 'Erro', erro = $2, atualizado_em = now() where id = $1", [p.id, "Falhou ao publicar: " + String(e.message).slice(0, 400)]);
+        const r = await enviar(nome, { rede: REDES[nome], midias: c.midias, legenda: c.legenda, opcoes: c.opcoes, chave: `pauta-${p.id}-${p.versao}-${REDES[nome]}` });
+        if (!r.ok) falhas.push(`${nome}: ${r.erro}`);
+      } catch (e) { falhas.push(`${nome}: ${String(e.message || e).slice(0, 200)}`); }
+      await anotar();
     }
+    const saiu = Object.values(links).some(v => !pendente(v));
+    const primeiro = Object.values(links).find(l => /^https?:/.test(l)) || null;
+    await db().query("update posts set status = $2, link_publicado = $3, id_agendamento = $4, erro = $5, links = $6, atualizado_em = now() where id = $1",
+      [p.id, saiu ? "Publicado" : "Erro", primeiro, ids.join(","), falhas.length ? (saiu ? "Não publicou em " : "Falhou ao publicar em ") + falhas.join(" · ").slice(0, 700) : null, JSON.stringify(links)]);
+  } catch (e) {
+    await db().query("update posts set status = 'Erro', erro = $2, atualizado_em = now() where id = $1", [p.id, "Falhou ao publicar: " + String(e.message).slice(0, 400)]);
   }
 }
