@@ -8,7 +8,7 @@ import { cifrar } from "../cripto.js";
 import { podeGerir } from "./conta.js";
 import { publicarJa, REDES_PUBLICACAO, escolherDoBanco } from "../tarefas/trabalhos.js";
 import { redesConectadas } from "../provedores/index.js";
-import { usar, devolver } from "../planos.js";
+import { usar, devolver, limiteModelos } from "../planos.js";
 
 const LOGOS = ["Logo", "LogoDark", "SimboloLight", "SimboloDark"];
 const STATUS_IDEIA = ["Sugerida", "Aprovada", "Descartada", "Guardada"];
@@ -45,9 +45,44 @@ function limparBriefing(r) {
 }
 // Modelos do perfil da organização, com os exemplos já como anexos (prévia leve).
 async function modelosDaMarca(org, m) {
-  const { rows } = await db().query("select id, nome, spec, exemplos, status, erro, criado_em from modelos_marca where org_id = $1 order by criado_em desc", [org]);
+  const { rows } = await db().query("select id, nome, spec, diag, exemplos, status, erro, criado_em from modelos_marca where org_id = $1 order by criado_em desc", [org]);
   const a = await anexos(org, rows.flatMap(r => r.exemplos || []));
-  return { modelos: rows.map(r => ({ id: r.id, nome: r.nome, spec: r.spec, status: r.status, erro: r.erro, exemplos: (r.exemplos || []).map(id => a.get(id)).filter(Boolean) })), modeloPadrao: (m && m.modelo_padrao) || null };
+  const lim = await limiteModelos(org);
+  return { modelos: rows.map(r => ({ id: r.id, nome: r.nome, spec: r.spec, diag: r.diag || null, status: r.status, erro: r.erro, exemplos: (r.exemplos || []).map(id => a.get(id)).filter(Boolean) })),
+    modeloPadrao: (m && m.modelo_padrao) || null, limiteModelos: { usados: rows.length, ...lim } };
+}
+// Cabe mais um modelo no plano?
+async function conferirLimiteModelos(org) {
+  const total = (await db().query("select count(*)::int as n from modelos_marca where org_id = $1", [org])).rows[0].n;
+  const lim = await limiteModelos(org);
+  if (total >= lim.maximo) falha(`O plano ${lim.plano} guarda até ${lim.maximo} modelo${lim.maximo === 1 ? "" : "s"}. Remova um ou mude de plano para salvar mais.`, 402, { plano: true });
+}
+// Diagramação válida (a mesma da revisão). Num modelo salvo, "escala" é o tamanho do texto de todas as imagens.
+function limparDiag(d = {}, { modelo = false } = {}) {
+  const um = (v, lista) => (lista.includes(v) ? v : lista[0]);
+  const diag = {
+    alinhar: um(d.alinhar, ["esquerda", "centro", "direita"]),
+    posicao: um(d.posicao, ["auto", "topo", "meio", "base"]),
+    ...(d.modelo === "proprio" && UUID.test(String(d.proprio || "")) ? { proprio: String(d.proprio) } : {}),
+    modelo: um(d.modelo, ["foto", "video", "proprio", "editorial", "lateral", "impacto", "minimal", "manchete", "cinema", "claro", "escuro"]),
+    fonte: um(d.fonte, ["auto", "poppins", "anton", "bebas", "archivo", "playfair", "dmserif"]),
+    fundo: um(d.fundo, ["auto", "claro", "escuro", "marca"]),
+    v: 3, // versão da diagramação: "auto" no fundo usa o padrão de cada modelo; Reels e Stories têm o modelo "video"
+    logo: um(d.logo, ["auto", "light", "dark", "simLight", "simDark", "nenhum"]),
+    logoPos: um(d.logoPos, ["te", "tc", "td", "be", "bc", "bd"]),
+  };
+  // Tamanho do texto por slide ou cena: de 0,6 a 1,6; o 1 (tamanho do modelo) não precisa ser guardado.
+  const escalas = {};
+  for (const [n, v] of Object.entries(d.escalas && typeof d.escalas === "object" ? d.escalas : {})) {
+    const k = parseInt(n, 10), x = Math.round(Number(v) * 100) / 100;
+    if (k >= 1 && k <= 20 && x >= 0.6 && x <= 1.6 && x !== 1) escalas[k] = x;
+  }
+  if (!modelo && Object.keys(escalas).length) diag.escalas = escalas;
+  const e = Math.round(Number(d.escala) * 100) / 100;
+  if (modelo && e >= 0.6 && e <= 1.6 && e !== 1) diag.escala = e;
+  if (diag.modelo === "proprio" && !diag.proprio) diag.modelo = "foto";
+  if (modelo && diag.modelo === "video") diag.modelo = "foto";
+  return diag;
 }
 const anexosIds = lista => (Array.isArray(lista) ? lista : []).map(a => a && a.id).filter(id => UUID.test(String(id || "")));
 
@@ -67,8 +102,7 @@ export const acoesPauta = {
     const instagram = b.instagram === true;
     const imagens = Array.isArray(b.imagens) ? b.imagens.slice(0, 8) : [];
     if (!instagram && imagens.length < 2) falha("Envie pelo menos 2 posts seus (até 8) para a IA entender o estilo.");
-    const total = (await db().query("select count(*)::int as n from modelos_marca where org_id = $1", [ctx.org])).rows[0].n;
-    if (total >= 10) falha("Você já tem 10 modelos. Remova algum para criar outro.");
+    await conferirLimiteModelos(ctx.org);
     if ((await db().query("select 1 from modelos_marca where org_id = $1 and status = 'gerando'", [ctx.org])).rows.length) falha("Já tem um modelo sendo criado. Espere ele ficar pronto.");
     const exemplos = [];
     for (const [k, im] of imagens.entries()) {
@@ -77,6 +111,20 @@ export const acoesPauta = {
     }
     const { rows } = await db().query("insert into modelos_marca (org_id, nome, exemplos) values ($1, $2, $3) returning id", [ctx.org, texto(b.nome, 40), exemplos]);
     await enfileirar(ctx.org, "criarModelo", { modelo: rows[0].id, instagram }, ctx.usuario.id);
+    return { id: rows[0].id };
+  },
+  // Modelo montado à mão no editor da marca (sem IA): cria um novo ou atualiza um que já existe.
+  async salvarModeloMarca(ctx, b) {
+    const diag = limparDiag(b.diagramacao, { modelo: true }), nome = texto(b.nome, 40) || "Modelo da marca";
+    if (diag.proprio && !(await db().query("select 1 from modelos_marca where id = $1 and org_id = $2 and spec is not null", [diag.proprio, ctx.org])).rows.length) { delete diag.proprio; diag.modelo = "foto"; }
+    if (b.id) {
+      const r = await db().query("update modelos_marca set nome = $3, diag = $4 where id = $1 and org_id = $2 and diag is not null returning id", [exigirId(b.id), ctx.org, nome, JSON.stringify(diag)]);
+      if (!r.rows.length) falha("Modelo não encontrado.", 404);
+      return { id: r.rows[0].id };
+    }
+    await conferirLimiteModelos(ctx.org);
+    const { rows } = await db().query("insert into modelos_marca (org_id, nome, diag, status) values ($1, $2, $3, 'pronto') returning id", [ctx.org, nome, JSON.stringify(diag)]);
+    if (b.padrao) await acoesPauta.modeloPadrao(ctx, { id: rows[0].id });
     return { id: rows[0].id };
   },
   async removerModelo(ctx, b) {
@@ -328,27 +376,7 @@ export const acoesPauta = {
 
   async salvarDiagramacao(ctx, b) {
     const p = await postDaOrg(ctx.org, b.id);
-    const d = b.diagramacao || {};
-    const um = (v, lista) => (lista.includes(v) ? v : lista[0]);
-    const diag = {
-      alinhar: um(d.alinhar, ["esquerda", "centro", "direita"]),
-      posicao: um(d.posicao, ["auto", "topo", "meio", "base"]),
-      ...(d.modelo === "proprio" && UUID.test(String(d.proprio || "")) ? { proprio: String(d.proprio) } : {}),
-      modelo: um(d.modelo, ["foto", "video", "proprio", "editorial", "lateral", "impacto", "minimal", "manchete", "cinema", "claro", "escuro"]),
-      fonte: um(d.fonte, ["auto", "poppins", "anton", "bebas", "archivo", "playfair", "dmserif"]),
-      fundo: um(d.fundo, ["auto", "claro", "escuro", "marca"]),
-      v: 3, // versão da diagramação: "auto" no fundo usa o padrão de cada modelo; Reels e Stories têm o modelo "video"
-      logo: um(d.logo, ["auto", "light", "dark", "simLight", "simDark", "nenhum"]),
-      logoPos: um(d.logoPos, ["te", "tc", "td", "be", "bc", "bd"]),
-    };
-    // Tamanho do texto por slide ou cena (A− / A+): de 0,6 a 1,6; o 1 (tamanho do modelo) não precisa ser guardado.
-    const escalas = {};
-    for (const [n, v] of Object.entries(d.escalas && typeof d.escalas === "object" ? d.escalas : {})) {
-      const k = parseInt(n, 10), x = Math.round(Number(v) * 10) / 10;
-      if (k >= 1 && k <= 20 && x >= 0.6 && x <= 1.6 && x !== 1) escalas[k] = x;
-    }
-    if (Object.keys(escalas).length) diag.escalas = escalas;
-    if (diag.modelo === "proprio" && !diag.proprio) diag.modelo = "foto";
+    const diag = limparDiag(b.diagramacao);
     await db().query("update posts set diagramacao = $2, artes_prontas = case when $3 then false else artes_prontas end, atualizado_em = now() where id = $1", [p.id, JSON.stringify(diag), !!b.refazer]);
     return {};
   },

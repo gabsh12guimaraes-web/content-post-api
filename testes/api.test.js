@@ -1001,3 +1001,29 @@ test("revisão: login em paralelo bloqueia, limite do plano aguenta concorrênci
   assert.equal((await db().query("select count(*)::int as n from tarefas where tipo = 'criar' and payload->>'post' = $1", [q.id])).rows[0].n, 1);
   await db().query("delete from tarefas where tipo = 'criar' and payload->>'post' = $1", [q.id]);
 });
+
+test("modelo montado à mão: salva a diagramação, vira padrão, edita e respeita o limite do plano", async () => {
+  const em = "modelos" + Date.now() + "@x.com";
+  const tk = (await chamar({ acao: "cadastrar", nome: "M", email: em, senha: "segredo123", organizacao: "Modelos" })).token;
+  process.env.COBRANCA = "sim";
+  try {
+    const d = { modelo: "cinema", fundo: "escuro", fonte: "playfair", alinhar: "centro", posicao: "base", logo: "nenhum", logoPos: "bd", escala: 1.25, lixo: "x" };
+    const r = await chamar({ acao: "salvarModeloMarca", nome: "Promoções", diagramacao: d, padrao: true }, tk);
+    assert.equal(r.status, 200, r.erro);
+    let l = await chamar({ acao: "listarModelos" }, tk);
+    const m = l.modelos.find(x => x.id === r.id);
+    assert.equal(m.status, "pronto");
+    assert.deepEqual({ ...m.diag, v: undefined }, { modelo: "cinema", fundo: "escuro", fonte: "playfair", alinhar: "centro", posicao: "base", logo: "nenhum", logoPos: "bd", escala: 1.25, v: undefined });
+    assert.equal(l.modeloPadrao, r.id);
+    assert.deepEqual(l.limiteModelos, { usados: 1, maximo: 1, plano: "Teste grátis" });
+    // o teste grátis guarda 1 modelo: o segundo é recusado (e criar pelo Instagram também)
+    const r2 = await chamar({ acao: "salvarModeloMarca", nome: "Outro", diagramacao: d }, tk);
+    assert.equal(r2.status, 402);
+    assert.match(r2.erro, /até 1 modelo/);
+    assert.equal((await chamar({ acao: "criarModelo", instagram: true }, tk)).status, 402);
+    // editar o que já existe não conta como novo
+    assert.equal((await chamar({ acao: "salvarModeloMarca", id: r.id, nome: "Promo 2", diagramacao: { ...d, fonte: "anton" } }, tk)).status, 200);
+    l = await chamar({ acao: "listarModelos" }, tk);
+    assert.equal(l.modelos[0].nome, "Promo 2"); assert.equal(l.modelos[0].diag.fonte, "anton");
+  } finally { delete process.env.COBRANCA; }
+});

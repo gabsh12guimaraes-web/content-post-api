@@ -9,10 +9,10 @@ import { ErroApi } from "./erros.js";
 const env = process.env;
 
 export const PLANOS = {
-  teste: { nome: "Teste grátis", posts: 3, ideias: 2, precos: null },
-  essencial: { nome: "Essencial", posts: 12, ideias: 8, de: { mensal: 369, semestral: 339, anual: 307 }, cupom: { mensal: 52, semestral: 50, anual: 46 } },
-  profissional: { nome: "Profissional", posts: 30, ideias: 20, de: { mensal: 877, semestral: 807, anual: 729 }, cupom: { mensal: 52, semestral: 49, anual: 45 } },
-  agencia: { nome: "Agência", posts: 80, ideias: 50, de: { mensal: 2307, semestral: 2117, anual: 1919 }, cupom: { mensal: 52, semestral: 49, anual: 45 } },
+  teste: { nome: "Teste grátis", posts: 3, ideias: 2, modelos: 1, precos: null },
+  essencial: { nome: "Essencial", posts: 12, ideias: 8, modelos: 3, de: { mensal: 369, semestral: 339, anual: 307 }, cupom: { mensal: 52, semestral: 50, anual: 46 } },
+  profissional: { nome: "Profissional", posts: 30, ideias: 20, modelos: 8, de: { mensal: 877, semestral: 807, anual: 729 }, cupom: { mensal: 52, semestral: 49, anual: 45 } },
+  agencia: { nome: "Agência", posts: 80, ideias: 50, modelos: 20, de: { mensal: 2307, semestral: 2117, anual: 1919 }, cupom: { mensal: 52, semestral: 49, anual: 45 } },
 };
 export const CICLOS = { mensal: 1, semestral: 6, anual: 12 };
 const centavos = v => Math.round(v * 100) / 100;
@@ -32,7 +32,7 @@ export function catalogo() {
   const links = lerJson("KIWIFY_CHECKOUT");
   return {
     planos: Object.entries(PLANOS).filter(([, p]) => p.precos).map(([id, p]) => ({
-      id, nome: p.nome, posts: p.posts, ideias: p.ideias,
+      id, nome: p.nome, posts: p.posts, ideias: p.ideias, modelos: p.modelos,
       ciclos: Object.entries(p.precos).map(([ciclo, porMes]) => {
         const cupom = p.cupom[ciclo] ? codigoCupom(id, ciclo) : null;
         return { ciclo, meses: CICLOS[ciclo], porMes, dePorMes: p.de[ciclo], desconto: p.cupom[ciclo] || 0, cupom, total: totalDo(p, ciclo), checkout: comCupom(links[`${id}:${ciclo}`], cupom) };
@@ -81,6 +81,12 @@ export async function usar(org, tipo) {
   }
   await tx.query("insert into uso (org_id, tipo) values ($1, $2)", [org, tipo]);
   });
+}
+// Quantos modelos da marca (do perfil e montados à mão) a organização pode guardar. Sem cobrança ligada ou isenta, o teto é alto.
+export async function limiteModelos(org) {
+  const s = await situacao(org);
+  const maximo = !cobrancaLigada() || s.isenta ? 30 : (PLANOS[s.plano] || PLANOS.teste).modelos;
+  return { maximo, plano: s.nome };
 }
 // Devolve o uso se a tarefa nem chegou a começar (ex.: erro ao enfileirar).
 export async function devolver(org, tipo) {
