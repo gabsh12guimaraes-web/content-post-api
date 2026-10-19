@@ -112,6 +112,8 @@ export const LIMITE_BYTES = 25 * 1024 * 1024;
 export async function salvarArquivo(org, { tipo, nome, dados, capa }) {
   if (!TIPOS_ACEITOS.includes(tipo)) throw Object.assign(new Error("Tipo de arquivo não aceito."), { status: 400 });
   if (dados.length > LIMITE_BYTES) throw Object.assign(new Error("Arquivo grande demais (máximo 25 MB)."), { status: 400 });
+  // Imagem que não abre (corrompida ou formato estranho) é recusada aqui, em vez de entrar quebrada no banco.
+  if (OTIMIZAVEIS.includes(tipo)) { try { const m = await sharp(dados, { failOn: "error" }).metadata(); if (!m.width) throw new Error(); } catch (e) { throw Object.assign(new Error("A imagem está corrompida ou num formato que não dá para abrir."), { status: 400 }); } }
   const chave = segredoCurto();
   const { rows } = await db().query(
     "insert into arquivos (org_id, tipo, nome, tamanho, chave) values ($1, $2, $3, $4, $5) returning id",

@@ -120,6 +120,8 @@ export async function criarApp() {
     } catch (e) {
       if (e instanceof ErroApi) return rep.code(e.status).send({ ok: false, erro: e.message, ...e.extra });
       if (e instanceof ErroIntegracao) return rep.code(400).send({ ok: false, erro: e.message });
+      // erros de validação com motivo (ex.: arquivo grande demais, imagem que não abre) chegam ao painel como são
+      if (e && Number(e.status) >= 400 && Number(e.status) < 500 && e.message) return rep.code(Number(e.status)).send({ ok: false, erro: e.message });
       console.error(`[api ${acao}]`, e);
       return rep.code(500).send({ ok: false, erro: "Erro interno. Tente de novo; se continuar, avise o suporte." });
     }

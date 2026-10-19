@@ -944,7 +944,7 @@ test("trocar a foto de um story por vídeo do banco tira a foto antiga (e vice-v
   const vid = await chamar({ acao: "enviarImagemBanco", tipo: "video/mp4", nome: "balcao.mp4", base64: MP4, titulo: "Balcão" }, ana);
   const arqV = (await chamar({ acao: "listarBanco" }, ana)).imagens.find(x => x.id === vid.id).arquivo.id;
   const { salvarArquivo } = await import("../src/arquivos.js");
-  const salvar = nome => salvarArquivo(anaOrg, { tipo: "image/png", nome, dados: Buffer.from("89504e470d0a1a0a", "hex") });
+  const salvar = nome => salvarArquivo(anaOrg, { tipo: "image/jpeg", nome, dados: Buffer.from(JPG, "base64") });
   const antiga = await salvar("ia.png"), arqF = await salvar("copo.png");
   const img = (await db().query("insert into banco_imagens (org_id, arquivo_id, nome, origem) values ($1, $2, 'Copo', 'envio') returning id", [anaOrg, arqF])).rows[0];
   const { rows: [p] } = await db().query(`insert into posts (org_id, titulo, data_publicacao, rede, formato, status, slides, fotos, briefing)
