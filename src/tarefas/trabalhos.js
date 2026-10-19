@@ -195,6 +195,8 @@ async function gerarMidias(org, post, c, regerar) {
   const fotos = { ...(post.fotos || {}) }, clipes = { ...(post.clipes || {}) };
   const velhos = [];
   const precisa = (mapa, n) => (regerar ? regerar.includes(n) : !mapa[n]);
+  // Os clipes vêm com som (ambiente da cena), a não ser que o post esteja marcado "Sem som" na diagramação.
+  const som = ((post.diagramacao && post.diagramacao.audio) || "original") !== "mudo";
   let falhas = 0, semCredito = false;
   // Sem crédito no Magnific, não adianta tentar as outras imagens: conta como falha e segue.
   const falhou = (tipo, e) => { if (e instanceof ErroIntegracao && /não está cadastrada/.test(e.message)) throw e; falhas++; if (/insufficient credits|sem cr[ée]dito/i.test(e.message)) semCredito = true; console.error("[" + tipo + "]", e.message); };
@@ -228,9 +230,9 @@ async function gerarMidias(org, post, c, regerar) {
   }
   const a = await anexos(org, Object.values(fotos));
   const pedidos = video
-    ? (c.cenas || []).map((x, i) => { const n = Number(x.n) || i + 1, f = fotos[n] && a.get(fotos[n]); return { n, prompt: x.prompt_video || x.visual || post.titulo, duracao: x.duracao_s, proporcao: "9:16", ...(f ? { imagem: f.url } : {}) }; })
+    ? (c.cenas || []).map((x, i) => { const n = Number(x.n) || i + 1, f = fotos[n] && a.get(fotos[n]); return { n, prompt: x.prompt_video || x.visual || post.titulo, duracao: x.duracao_s, proporcao: "9:16", som, ...(f ? { imagem: f.url } : {}) }; })
     : (c.slides || []).filter(x => x.usa_video && fotos[x.n] && a.get(fotos[x.n])).slice(0, 10)
-      .map(x => ({ n: Number(x.n), prompt: x.prompt_video || x.titulo || post.titulo, duracao: 5, proporcao: "1:1", imagem: a.get(fotos[x.n]).url }));
+      .map(x => ({ n: Number(x.n), prompt: x.prompt_video || x.titulo || post.titulo, duracao: 5, proporcao: "1:1", som, imagem: a.get(fotos[x.n]).url }));
   for (const p of pedidos) {
     if (!precisa(clipes, p.n)) continue;
     if (semCredito) { falhas++; continue; }

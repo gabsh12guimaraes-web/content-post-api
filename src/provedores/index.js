@@ -121,10 +121,12 @@ export async function gerarFotoComPessoa(org, prompt, proporcao, rosto) {
     throw e;
   }
 }
-export async function gerarClipe(org, { prompt, duracao, proporcao, imagem }) {
+// som: o Kling gera o áudio junto (efeitos e ambiente da cena). Sem fala, porque ela sairia em inglês e fora do roteiro.
+export async function gerarClipe(org, { prompt, duracao, proporcao, imagem, som = false }) {
   const segundos = Math.min(10, Math.max(3, Math.round(Number(duracao) || 5)));
+  if (som) prompt = `${prompt} Sound: natural ambient sound and effects that match the scene, no speech, no dialogue, no narration.`;
   const url = await tarefaMagnific(org, "/v1/ai/video/kling-v3-std", "/v1/ai/video/kling-v3",
-    Object.assign({ prompt, duration: String(segundos), aspect_ratio: proporcao, generate_audio: false, cfg_scale: 0.5 }, imagem ? { start_image_url: imagem } : {}),
+    Object.assign({ prompt, duration: String(segundos), aspect_ratio: proporcao, generate_audio: !!som, cfg_scale: 0.5 }, imagem ? { start_image_url: imagem } : {}),
     { intervalo: 20000 });
   await registrarConsumo(org, "magnific", { tipo: "clipe", quantidade: segundos }); // quantidade = segundos de vídeo
   return url;
