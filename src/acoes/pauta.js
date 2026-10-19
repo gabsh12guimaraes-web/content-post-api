@@ -72,6 +72,7 @@ function limparDiag(d = {}, { modelo = false } = {}) {
     v: 3, // versão da diagramação: "auto" no fundo usa o padrão de cada modelo; Reels e Stories têm o modelo "video"
     logo: um(d.logo, ["auto", "light", "dark", "simLight", "simDark", "nenhum"]),
     logoPos: um(d.logoPos, ["te", "tc", "td", "be", "bc", "bd"]),
+    audio: um(d.audio, ["original", "mudo"]), // vídeo final com o som dos vídeos usados ou sem som
   };
   // Tamanho do texto por slide ou cena: de 0,6 a 1,6; o 1 (tamanho do modelo) não precisa ser guardado.
   const escalas = {};
@@ -84,6 +85,7 @@ function limparDiag(d = {}, { modelo = false } = {}) {
   if (modelo && e >= 0.6 && e <= 1.6 && e !== 1) diag.escala = e;
   if (diag.modelo === "proprio" && !diag.proprio) diag.modelo = "foto";
   if (modelo && diag.modelo === "video") diag.modelo = "foto";
+  if (modelo) delete diag.audio; // o áudio é escolha de cada post, não do modelo
   return diag;
 }
 const anexosIds = lista => (Array.isArray(lista) ? lista : []).map(a => a && a.id).filter(id => UUID.test(String(id || "")));
