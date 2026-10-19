@@ -29,7 +29,7 @@ const custo = c => custoDe("anthropic", "", c) + custoDe("magnific", "foto", { q
 export async function linhasRelatorio() {
   const inicioMes = inicioDoMes();
   const pessoas = (await db().query(`
-    select u.nome, u.email, u.criado_em, u.ultimo_acesso, m.papel, o.id as org, o.nome as organizacao, o.criado_em as org_criada_em, o.plano, o.ciclo, o.plano_ate
+    select u.nome, u.email, u.criado_em, u.ultimo_acesso, m.papel, o.id as org, o.nome as organizacao, o.criado_em as org_criada_em, o.plano, o.ciclo, o.plano_ate, o.pago_centavos
     from usuarios u left join membros m on m.usuario_id = u.id left join organizacoes o on o.id = m.org_id
     order by u.criado_em desc, o.criado_em`)).rows;
   const porOrg = async (sql, params = []) => new Map((await db().query(sql, params)).rows.map(r => [r.org_id, r]));
@@ -66,7 +66,8 @@ export async function linhasRelatorio() {
     const isenta = temOrg && donosIsentos.has(p.org);
     const situacao = !temOrg ? "sem organização" : isenta ? "isenta" : pago ? (ativo ? "assinante ativo" : "assinatura vencida") : (ativo ? "teste grátis" : "teste vencido");
     const u = de(uso, p.org), c = de(consumo, p.org), cm = de(consumoMes, p.org), po = de(posts, p.org), k = kiwify.get(p.org);
-    const valorCiclo = pago && plano.de && CICLOS[p.ciclo] ? totalDo(plano, p.ciclo) : 0;
+    // valor real pago na última cobrança (com cupom); sem ele, o preço de tabela
+    const valorCiclo = pago && CICLOS[p.ciclo] ? (p.pago_centavos ? p.pago_centavos / 100 : plano.de ? totalDo(plano, p.ciclo) : 0) : 0;
     return {
       nome: p.nome, email: p.email, cadastrado_em: dataIso(p.criado_em), ultimo_acesso: dataIso(p.ultimo_acesso),
       organizacao: p.organizacao || "", papel: p.papel || "", pessoas_na_org: temOrg ? de(membros, p.org).n : "", org_criada_em: dataIso(p.org_criada_em),

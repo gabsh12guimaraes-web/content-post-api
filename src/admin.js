@@ -22,7 +22,7 @@ export async function painelAdmin(ctx) {
   const [u] = await q(`select count(*)::int as total, count(*) filter (where criado_em >= $1)::int as novos7, count(*) filter (where criado_em >= $2)::int as novos30,
       count(*) filter (where ultimo_acesso >= $1)::int as ativos7, count(*) filter (where ultimo_acesso >= $2)::int as ativos30 from usuarios`, [d7, d30]);
   const novosPorDia = await q("select to_char(criado_em at time zone 'UTC', 'YYYY-MM-DD') as dia, count(*)::int as n from usuarios where criado_em >= $1 group by 1", [d30]);
-  const orgs = await q(`select o.id, o.nome, o.plano, o.ciclo, o.plano_ate, o.criado_em,
+  const orgs = await q(`select o.id, o.nome, o.plano, o.ciclo, o.plano_ate, o.criado_em, o.pago_centavos, o.liquido_centavos,
       exists (select 1 from membros m join usuarios us on us.id = m.usuario_id where m.org_id = o.id and m.papel = 'dono' and lower(us.email) = any($1::text[])) as isenta
     from organizacoes o`, [isentos()]);
   const situacao = o => (o.isenta ? "isenta" : o.plano !== "teste" ? (new Date(o.plano_ate) > agora ? "assinante" : "vencida") : (new Date(o.plano_ate) > agora ? "teste" : "teste_vencido"));
@@ -34,9 +34,12 @@ export async function painelAdmin(ctx) {
     const s = situacao(o); porSituacao[s]++;
     if (s === "assinante") {
       const p = PLANOS[o.plano], meses = CICLOS[o.ciclo] || 1;
-      const total = p && p.de && CICLOS[o.ciclo] ? totalDo(p, o.ciclo) : 0, porMes = total / meses;
-      mrr += porMes; taxasMes += (total * KIWIFY.taxa + KIWIFY.fixa) / meses;
-      receitaOrg.set(o.id, porMes);
+      // Valor real da última cobrança (com cupom e taxas, como a Kiwify mostra); sem ele, o preço de tabela.
+      const tabela = p && p.de && CICLOS[o.ciclo] ? totalDo(p, o.ciclo) : 0;
+      const total = o.pago_centavos ? o.pago_centavos / 100 : tabela;
+      const liquido = o.liquido_centavos ? o.liquido_centavos / 100 : total ? total - (total * KIWIFY.taxa + KIWIFY.fixa) : 0;
+      mrr += total / meses; taxasMes += (total - liquido) / meses;
+      receitaOrg.set(o.id, liquido / meses);
       const k = `${p ? p.nome : o.plano} ${o.ciclo || ""}`.trim(); porPlano[k] = (porPlano[k] || 0) + 1;
     }
   }

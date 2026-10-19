@@ -129,17 +129,31 @@ async function orgDoPedido(c) {
   return r ? r.org_id : null;
 }
 
+// Valor da Kiwify em centavos ("8990" ou 8990); se vier com ponto ou vírgula, está em reais.
+const emCentavos = v => {
+  if (v === null || v === undefined || v === "") return null;
+  const t = String(v).trim(), n = Number(t.replace(",", "."));
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return /[.,]/.test(t) ? Math.round(n * 100) : Math.round(n);
+};
+// O que a cobrança rendeu de verdade (com cupom): pago pelo cliente e líquido depois das taxas da Kiwify.
+const valoresDa = c => { const m = c.Commissions || {}; return { pago: emCentavos(m.charge_amount ?? m.product_base_price), liquido: emCentavos(m.my_commission ?? m.settlement_amount) }; };
+async function guardarValores(org, c) {
+  const v = valoresDa(c);
+  if (org && (v.pago || v.liquido)) await db().query("update organizacoes set pago_centavos = coalesce($2, pago_centavos), liquido_centavos = coalesce($3, liquido_centavos) where id = $1", [org, v.pago, v.liquido]);
+}
 export async function avisoKiwify(c) {
   const evento = String(c.webhook_event_type || c.order_status || "").toLowerCase();
   const pedido = String(c.order_id || c.order_ref || "");
   const sub = c.Subscription || {};
+  const pago = ["order_approved", "subscription_renewed", "paid", "approved"].includes(evento);
   const chave = `${pedido}|${evento}|${sub.charges ? JSON.stringify(sub.charges).length : ""}|${c.approved_date || c.updated_at || ""}`;
   const ja = (await db().query("select 1 from kiwify_eventos where chave = $1", [chave])).rows[0];
-  if (ja) return { repetido: true };
+  // Aviso repetido não mexe no plano, mas ainda grava o valor pago (reenviar o aviso na Kiwify corrige uma venda antiga).
+  if (ja) { if (pago) await guardarValores(await orgDoPedido(c), c); return { repetido: true }; }
   const org = await orgDoPedido(c);
   let resultado = "ignorado";
   if (org) {
-    const pago = ["order_approved", "subscription_renewed", "paid", "approved"].includes(evento);
     const estorno = ["order_refunded", "chargeback", "refunded", "chargedback"].includes(evento);
     const cancelado = ["subscription_canceled", "canceled"].includes(evento);
     if (pago) {
@@ -151,6 +165,7 @@ export async function avisoKiwify(c) {
         ate.setDate(ate.getDate() + 3);
         await db().query("update organizacoes set plano = $2, ciclo = $3, plano_ate = $4, kiwify_assinatura = coalesce($5, kiwify_assinatura) where id = $1",
           [org, pc.plano, pc.ciclo, ate, sub.id || null]);
+        await guardarValores(org, c);
         resultado = `ativado ${pc.plano}:${pc.ciclo} até ${ate.toISOString().slice(0, 10)}`;
       } else resultado = "produto sem plano";
     } else if (estorno) {

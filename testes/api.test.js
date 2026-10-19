@@ -295,6 +295,13 @@ test("planos: limite do teste, aviso da Kiwify ativa o plano e assinatura falsa 
     assert.match(bom.json().resultado, /ativado profissional:anual/);
     const de_novo = await app.inject({ method: "POST", url: "/kiwify?signature=" + sig, payload: corpo, headers: { "content-type": "application/json" } });
     assert.equal(de_novo.json().repetido, true);
+    // Aviso reenviado com os valores da cobrança (cupom): não reativa nada, mas grava o valor real pago e o líquido.
+    const comValor = JSON.stringify({ ...JSON.parse(corpo), Commissions: { charge_amount: "8990", my_commission: "8147", currency: "BRL" } });
+    const sigV = crypto.createHmac("sha1", "tok-teste").update(comValor).digest("hex");
+    const reenvio = await app.inject({ method: "POST", url: "/kiwify?signature=" + sigV, payload: comValor, headers: { "content-type": "application/json" } });
+    assert.equal(reenvio.json().repetido, true);
+    const v = (await db().query("select pago_centavos, liquido_centavos from organizacoes where id = $1", [org])).rows[0];
+    assert.deepEqual([v.pago_centavos, v.liquido_centavos], [8990, 8147]);
 
     const p = await chamar({ acao: "plano" }, duda);
     assert.equal(p.situacao.plano, "profissional");
