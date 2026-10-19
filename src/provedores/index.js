@@ -111,8 +111,14 @@ export const gerarFoto = (org, prompt, proporcao) =>
     .then(async url => { await registrarConsumo(org, "magnific", { tipo: "foto", quantidade: 1 }); return url; });
 // Foto com uma pessoa real: o Seedream 4.5 Edit recebe a foto de rosto como referência e põe a pessoa na cena do prompt.
 const PROPORCAO_SEEDREAM = { "4:5": "traditional_3_4", "1:1": "square_1_1", "9:16": "social_story_9_16", "16:9": "widescreen_16_9" };
-export async function gerarFotoComPessoa(org, prompt, proporcao, rosto) {
-  const corpo = { prompt, reference_images: [rosto], aspect_ratio: PROPORCAO_SEEDREAM[proporcao] || "traditional_3_4", enable_safety_checker: true };
+// refs: [{ url, papel: "pessoa" | "produto" }] (aceita também só o link do rosto, como antes).
+export async function gerarFotoComPessoa(org, prompt, proporcao, refs) {
+  const lista = (Array.isArray(refs) ? refs : [{ url: refs, papel: "pessoa" }]).filter(r => r && r.url);
+  // Com mais de uma referência, diz ao gerador qual imagem é qual; o produto sai igual ao da foto.
+  const guia = lista.map((r, k) => `Reference image ${k + 1} is the ${r.papel === "produto" ? "product/object" : "person"}.`).join(" ");
+  const fiel = lista.some(r => r.papel === "produto") ? " Keep the product/object exactly as in its reference: same shape, colors, materials, label and proportions." : "";
+  if (lista.length > 1 || fiel) prompt = `${lista.length > 1 ? guia + " " : ""}${prompt}${fiel}`;
+  const corpo = { prompt, reference_images: lista.map(r => r.url), aspect_ratio: PROPORCAO_SEEDREAM[proporcao] || "traditional_3_4", enable_safety_checker: true };
   const ir = c => tarefaMagnific(org, "/v1/ai/text-to-image/seedream-v4-5-edit", "/v1/ai/text-to-image/seedream-v4-5-edit", c, { intervalo: 10000, limiteMs: 15 * 60000 });
   try { const url = await ir(corpo); await registrarConsumo(org, "magnific", { tipo: "foto_pessoa", quantidade: 1 }); return url; }
   catch (e) {

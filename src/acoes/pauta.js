@@ -42,6 +42,7 @@ function limparBriefing(r) {
     imagens: um(r.imagens, ["ia", "banco", "misto"]),
     banco: Array.isArray(r.banco) ? r.banco.filter(x => UUID.test(String(x))).slice(0, 20) : undefined,
     pessoa: UUID.test(String(r.pessoa || "")) ? String(r.pessoa) : undefined,
+    produto: UUID.test(String(r.produto || "")) ? String(r.produto) : undefined,
   };
   Object.keys(br).forEach(k => br[k] === undefined && delete br[k]);
   return br;
@@ -67,7 +68,7 @@ function limparDiag(d = {}, { modelo = false } = {}) {
     alinhar: um(d.alinhar, ["esquerda", "centro", "direita"]),
     posicao: um(d.posicao, ["auto", "topo", "meio", "base"]),
     ...(d.modelo === "proprio" && UUID.test(String(d.proprio || "")) ? { proprio: String(d.proprio) } : {}),
-    modelo: um(d.modelo, ["foto", "video", "proprio", "editorial", "lateral", "impacto", "minimal", "manchete", "cinema", "claro", "escuro"]),
+    modelo: um(d.modelo, ["foto", "video", "proprio", "editorial", "lateral", "impacto", "minimal", "manchete", "cinema", "grade", "claro", "escuro"]),
     fonte: um(d.fonte, ["auto", "poppins", "anton", "bebas", "archivo", "playfair", "dmserif"]),
     fundo: um(d.fundo, ["auto", "claro", "escuro", "marca"]),
     v: 3, // versão da diagramação: "auto" no fundo usa o padrão de cada modelo; Reels e Stories têm o modelo "video"
@@ -195,19 +196,20 @@ export const acoesPauta = {
     return { id };
   },
 
-  /* ---------- pessoas (foto de rosto para posts humanizados) ---------- */
+  /* ---------- pessoas (foto de rosto para posts humanizados) e produtos/objetos (foto de referência) ---------- */
   async listarPessoas(ctx) {
     const { rows } = await db().query("select * from pessoas where org_id = $1 order by criado_em desc", [ctx.org]);
     const a = await anexos(ctx.org, rows.map(r => r.arquivo_id));
-    return { pessoas: rows.map(r => ({ id: r.id, nome: r.nome, arquivo: a.get(r.arquivo_id) || null })).filter(x => x.arquivo) };
+    return { pessoas: rows.map(r => ({ id: r.id, nome: r.nome, tipo: r.tipo || "pessoa", arquivo: a.get(r.arquivo_id) || null })).filter(x => x.arquivo) };
   },
   async enviarPessoa(ctx, b) {
-    if (b.autorizado !== true) falha("Confirme que você tem autorização desta pessoa para usar a imagem dela.");
+    const produto = b.referencia === "produto";
+    if (!produto && b.autorizado !== true) falha("Confirme que você tem autorização desta pessoa para usar a imagem dela.");
     if (!["image/png", "image/jpeg", "image/webp"].includes(b.tipo)) falha("Envie a foto em JPG, PNG ou WEBP.");
-    const total = (await db().query("select count(*)::int as n from pessoas where org_id = $1", [ctx.org])).rows[0].n;
-    if (total >= 30) falha("Cadastre até 30 pessoas. Remova alguma para enviar outra.");
-    const arquivo = await salvarArquivo(ctx.org, { tipo: b.tipo, nome: b.nome || "rosto", dados: doBase64(b.base64, 8 * 1024 * 1024) });
-    const { rows } = await db().query("insert into pessoas (org_id, arquivo_id, nome, autorizado_por) values ($1, $2, $3, $4) returning id", [ctx.org, arquivo, texto(b.nome, 60), ctx.usuario.id]);
+    const total = (await db().query("select count(*)::int as n from pessoas where org_id = $1 and tipo = $2", [ctx.org, produto ? "produto" : "pessoa"])).rows[0].n;
+    if (total >= 30) falha(produto ? "Cadastre até 30 produtos. Remova algum para enviar outro." : "Cadastre até 30 pessoas. Remova alguma para enviar outra.");
+    const arquivo = await salvarArquivo(ctx.org, { tipo: b.tipo, nome: b.nome || (produto ? "produto" : "rosto"), dados: doBase64(b.base64, 8 * 1024 * 1024) });
+    const { rows } = await db().query("insert into pessoas (org_id, arquivo_id, nome, autorizado_por, tipo) values ($1, $2, $3, $4, $5) returning id", [ctx.org, arquivo, texto(b.nome, 60), ctx.usuario.id, produto ? "produto" : "pessoa"]);
     return { id: rows[0].id };
   },
   async removerPessoa(ctx, b) {
@@ -516,9 +518,14 @@ export const acoesPauta = {
     if (!["Planejado", "Erro"].includes(p.status)) falha("Este post já foi criado.");
     const br = limparBriefing(b.briefing);
     if (br.pessoa) {
-      const pe = (await db().query("select nome from pessoas where id = $1 and org_id = $2", [br.pessoa, ctx.org])).rows[0];
+      const pe = (await db().query("select nome from pessoas where id = $1 and org_id = $2 and tipo = 'pessoa'", [br.pessoa, ctx.org])).rows[0];
       if (!pe) falha("Essa pessoa não está mais cadastrada. Escolha outra ou envie a foto de novo.");
       if (pe.nome) br.pessoaNome = pe.nome;
+    }
+    if (br.produto) {
+      const pr = (await db().query("select nome from pessoas where id = $1 and org_id = $2 and tipo = 'produto'", [br.produto, ctx.org])).rows[0];
+      if (!pr) falha("Esse produto não está mais cadastrado. Escolha outro ou envie a foto de novo.");
+      if (pr.nome) br.produtoNome = pr.nome;
     }
     // Marca "EmCriacao" antes de cobrar: um clique duplo (ou duas abas) não cria nem cobra duas vezes.
     const tomou = await db().query("update posts set status = 'EmCriacao', erro = null, briefing = $2, atualizado_em = now() where id = $1 and status in ('Planejado', 'Erro') returning id", [p.id, Object.keys(br).length ? JSON.stringify(br) : null]);

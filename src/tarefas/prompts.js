@@ -56,12 +56,18 @@ Pessoa real (posts humanizados):
 - Em Reels e Stories em vídeo, marque "pessoa": true na cena e escreva "prompt_imagem" (em inglês) com o primeiro quadro da cena mostrando a pessoa; o "prompt_video" descreve o movimento a partir dele (gestos leves, câmera suave).
 - Não invente o nome nem o cargo da pessoa na legenda ou nos slides, a não ser que o briefing diga.
 
+Produto ou objeto real:
+- Se o <briefing> trouxer um produto ou objeto, a plataforma manda a foto dele para o gerador de imagem. Mostre o produto onde ele faz sentido (capa, em uso, detalhe, no ambiente), não necessariamente em todas as imagens.
+- Nesses itens de "prompts_imagem", coloque "produto": true e escreva o prompt com "the product from the reference photo" num cenário concreto: superfície, ambiente, luz, ângulo e enquadramento (still de produto, em uso, nas mãos de alguém, close de detalhe). Não descreva forma, cor, rótulo ou embalagem: isso vem da foto.
+- Em Reels e Stories em vídeo, marque "produto": true na cena e escreva "prompt_imagem" (em inglês) com o primeiro quadro mostrando o produto; o "prompt_video" descreve um movimento suave (câmera girando, mão pegando, luz passando).
+- Pessoa e produto podem aparecer juntos na mesma imagem ("pessoa": true e "produto": true), por exemplo a pessoa usando o produto.
+
 Briefing:
 - Se a mensagem trouxer <briefing>, ele foi escolhido pela pessoa e tem prioridade sobre as regras de formato acima (quantidade de slides, capa, onde vai foto ou vídeo, duração, número de cenas). Nesse caso o limite de 3 slides em vídeo não vale.
 - Slide com vídeo sempre leva também "usa_imagem": true e um prompt de imagem (a imagem é o primeiro quadro do vídeo). Slide "só texto" leva "usa_imagem": false e "usa_video": false.
 
 Responda APENAS com um objeto JSON neste formato:
-{"legenda":"","hashtags":["#..."],"slides":[{"n":1,"titulo":"","texto":"","usa_imagem":true,"usa_video":false,"prompt_video":"","imagem_banco":""}],"cenas":[{"n":1,"duracao_s":5,"visual":"","fala_ou_texto":"","prompt_video":"","imagem_banco":"","pessoa":false,"prompt_imagem":""}],"prompts_imagem":[{"slide":1,"prompt":"","proporcao":"4:5","pessoa":false}]}
+{"legenda":"","hashtags":["#..."],"slides":[{"n":1,"titulo":"","texto":"","usa_imagem":true,"usa_video":false,"prompt_video":"","imagem_banco":""}],"cenas":[{"n":1,"duracao_s":5,"visual":"","fala_ou_texto":"","prompt_video":"","imagem_banco":"","pessoa":false,"produto":false,"prompt_imagem":""}],"prompts_imagem":[{"slide":1,"prompt":"","proporcao":"4:5","pessoa":false,"produto":false}]}
 "slides" é usado em Carrossel e Estatico; "cenas" em Reels e Stories. O que não se aplica vem como lista vazia.`;
 
 export const SISTEMA_AJUSTE = `Você está revisando um post da marca descrita em <marca>, a pedido da pessoa responsável pela marca.
@@ -73,7 +79,7 @@ Regras:
 4. Se o pedido violar <marca><evitar>, não aplique essa parte e explique em "resumo_mudancas".
 5. Continue seguindo o tom de voz, o idioma (<marca><idioma>) e as regras de formato da marca.
 6. Se mudou o conteúdo de um slide ou cena que tem imagem ou vídeo, avalie se o prompt também precisa mudar. Liste em "alterou_imagens" só os slides ou cenas cuja IMAGEM ou VÍDEO precisa ser gerado de novo.
-7. Mantenha "pessoa" (e "prompt_imagem" das cenas) como estão, a não ser que o comentário peça para tirar ou colocar a pessoa da foto de referência numa imagem.
+7. Mantenha "pessoa", "produto" (e "prompt_imagem" das cenas) como estão, a não ser que o comentário peça para tirar ou colocar a pessoa ou o produto da foto de referência numa imagem.
 
 Responda APENAS com um objeto JSON com os mesmos campos da versão atual (legenda, hashtags, slides, cenas, prompts_imagem) mais:
 "alterou_legenda": true|false, "alterou_slides": [números], "alterou_imagens": [números], "resumo_mudancas": "frase curta dizendo o que mudou"`;
@@ -88,6 +94,7 @@ Escolha o layout base mais parecido entre estes (o texto e o logo entram por cim
 - "minimal": fundo claro, título pequeno e elegante no topo, foto embaixo.
 - "manchete": fundo branco, título grande como manchete de jornal, foto num cartão embaixo.
 - "cinema": foto inteira, véu escuro embaixo e o título centralizado, em fonte com serifa.
+- "grade": foto inteira com linhas finas de grade, símbolo e logo no topo, contador e chamadas em fonte mono, título grande de peso médio embaixo e rodapé com @ e ano (estilo de estúdio de branding).
 
 Fontes disponíveis para o título: "poppins" (sem serifa, moderna), "anton" (condensada, forte, caixa alta), "bebas" (condensada, fina, caixa alta), "archivo" (sem serifa, bem pesada), "playfair" (serifa elegante), "dmserif" (serifa clássica). Escolha a mais parecida com a dos posts.
 
@@ -153,6 +160,7 @@ export function briefingTexto(b, formato) {
   const img = { banco: 'todas as imagens vêm do <banco_de_imagens> ("imagem_banco" em cada slide ou cena com imagem); não gere prompts de imagem', misto: 'use o <banco_de_imagens> para mostrar os produtos e gere imagens com IA só para ambientação ou conceito' }[b.imagens];
   if (img) L.push('- ' + img);
   if (b.pessoa) L.push('- pessoa real: mostre a pessoa da foto de referência' + (b.pessoaNome ? ' (' + String(b.pessoaNome).slice(0, 60) + ')' : '') + ' nas imagens onde ela faz sentido, com "pessoa": true (veja as regras de pessoa real)');
+  if (b.produto) L.push('- produto ou objeto real: mostre o produto da foto de referência' + (b.produtoNome ? ' (' + String(b.produtoNome).slice(0, 60) + ')' : '') + ' nas imagens onde ele faz sentido, com "produto": true (veja as regras de produto)');
   const obj = { engajar: 'engajar (comentários, salvamentos, compartilhamentos)', educar: 'educar e tirar dúvidas', vender: 'converter: levar para compra ou cadastro', institucional: 'fortalecer a marca' }[b.objetivo];
   if (obj) L.push('- objetivo: ' + obj);
   if (b.observacoes) L.push('- observações da pessoa: ' + String(b.observacoes).slice(0, 1000));

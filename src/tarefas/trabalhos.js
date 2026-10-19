@@ -108,7 +108,7 @@ export function limparSpec(c) {
   const m = c.moldura || {};
   return {
     nome: String(c.nome || "Modelo do perfil").slice(0, 40), descricao: String(c.descricao || "").slice(0, 200),
-    base: umDe(c.base, ["foto", "editorial", "lateral", "impacto", "minimal", "manchete", "cinema"], "foto"),
+    base: umDe(c.base, ["foto", "editorial", "lateral", "impacto", "minimal", "manchete", "cinema", "grade"], "foto"),
     fonte: umDe(c.fonte, ["poppins", "anton", "bebas", "archivo", "playfair", "dmserif"], "poppins"), caixa_alta: !!c.caixa_alta,
     fundo: HEX(c.fundo) || "#111111", tinta: HEX(c.tinta) || "#FFFFFF", apoio: HEX(c.apoio) || HEX(c.tinta) || "#DDDDDD", destaque: HEX(c.destaque) || "#F8395A",
     alinhar: umDe(c.alinhar, ["esquerda", "centro", "direita"], "esquerda"), posicao: umDe(c.posicao, ["topo", "meio", "base"], "base"),
@@ -181,17 +181,21 @@ export async function guardarNoBanco(org, arquivo, { nome, descricao, video, pos
   } catch (e) { console.error("[banco]", e.message); }
 }
 const nomeNoBanco = (post, n) => (String(post.titulo || "Post").slice(0, 64) + " · " + n).slice(0, 80);
-// Foto de rosto da pessoa escolhida no briefing (posts humanizados), como link público para o Magnific.
-async function rostoDoPost(org, post) {
-  const id = post.briefing && post.briefing.pessoa;
+// Fotos de referência escolhidas no briefing, como link público para o Magnific: rosto da pessoa (posts humanizados)
+// e foto do produto ou objeto.
+async function referenciaDoPost(org, post, campo) {
+  const id = post.briefing && post.briefing[campo];
   if (!id) return null;
   const p = (await db().query("select arquivo_id from pessoas where id = $1 and org_id = $2", [id, org])).rows[0];
   return p ? ((await anexos(org, [p.arquivo_id])).get(p.arquivo_id) || {}).url || null : null;
 }
 async function gerarMidias(org, post, c, regerar) {
   const video = ehVideo(post.formato, post);
-  const rosto = await rostoDoPost(org, post);
-  const foto = (x, proporcao) => (rosto && x.pessoa ? gerarFotoComPessoa(org, x.prompt, proporcao, rosto) : gerarFoto(org, x.prompt, proporcao));
+  const rosto = await referenciaDoPost(org, post, "pessoa"), produto = await referenciaDoPost(org, post, "produto");
+  const foto = (x, proporcao) => {
+    const refs = [x.pessoa && rosto ? { url: rosto, papel: "pessoa" } : null, x.produto && produto ? { url: produto, papel: "produto" } : null].filter(Boolean);
+    return refs.length ? gerarFotoComPessoa(org, x.prompt, proporcao, refs) : gerarFoto(org, x.prompt, proporcao);
+  };
   const fotos = { ...(post.fotos || {}) }, clipes = { ...(post.clipes || {}) };
   const velhos = [];
   const precisa = (mapa, n) => (regerar ? regerar.includes(n) : !mapa[n]);
@@ -214,14 +218,14 @@ async function gerarMidias(org, post, c, regerar) {
       } catch (e) { falhou("foto", e); }
     }
   }
-  // Em Reels e Stories, a cena com a pessoa ganha um primeiro quadro com ela, que o Kling anima.
-  if (video && rosto) {
+  // Em Reels e Stories, a cena com a pessoa ou o produto ganha um primeiro quadro com eles, que o Kling anima.
+  if (video && (rosto || produto)) {
     for (const [i, x] of (c.cenas || []).entries()) {
       const n = Number(x.n) || i + 1;
-      if (!x.pessoa || !precisa(clipes, n) || (fotos[n] && !(regerar || []).includes(n))) continue;
+      if (!((x.pessoa && rosto) || (x.produto && produto)) || !precisa(clipes, n) || (fotos[n] && !(regerar || []).includes(n))) continue;
       if (semCredito) { falhas++; continue; }
       try {
-        const url = await foto({ pessoa: true, prompt: x.prompt_imagem || x.visual || post.titulo }, "9:16");
+        const url = await foto({ pessoa: !!x.pessoa, produto: !!x.produto, prompt: x.prompt_imagem || x.visual || post.titulo }, "9:16");
         const id = await guardarDeUrl(org, url, `quadro-${n}`);
         if (fotos[n]) velhos.push(fotos[n]);
         fotos[n] = id;

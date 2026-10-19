@@ -1158,3 +1158,50 @@ test("pauta responde só 'igual' quando nada mudou desde a versão do painel", a
   const c = await chamar({ acao: "pauta", versao: a.versao }, ana);
   assert.equal(c.igual, undefined); assert.notEqual(c.versao, a.versao); assert.ok(Array.isArray(c.ideias));
 });
+
+test("produto ou objeto: sem pedir autorização, vai como referência e junto com a pessoa quando os dois são marcados", async () => {
+  const { id: produto } = await chamar({ acao: "enviarPessoa", referencia: "produto", tipo: "image/jpeg", nome: "Pulseira azul", base64: JPG }, ana);
+  assert.ok(produto, "produto não precisa da confirmação de autorização");
+  const { id: pessoa } = await chamar({ acao: "enviarPessoa", tipo: "image/jpeg", nome: "Gabriel", base64: JPG, autorizado: true }, ana);
+  const lista = (await chamar({ acao: "listarPessoas" }, ana)).pessoas;
+  assert.equal(lista.find(x => x.id === produto).tipo, "produto"); assert.equal(lista.find(x => x.id === pessoa).tipo, "pessoa");
+  const i = (await db().query("insert into ideias (org_id, titulo, formato, rede, score) values ($1, 'A pulseira no bar', 'Carrossel', 'Instagram', 8) returning id", [anaOrg])).rows[0].id;
+  const { id } = await chamar({ acao: "agendarIdeia", id: i, data: new Date(Date.now() + 6 * 86400000).toISOString() }, ana);
+  const original = globalThis.fetch, seedream = [];
+  let corpoClaude = null, k = 0;
+  globalThis.fetch = async (url, op = {}) => {
+    const u = String(url);
+    const json = o => new Response(JSON.stringify(o), { headers: { "content-type": "application/json" } });
+    if (u.includes("anthropic.com")) {
+      corpoClaude = JSON.parse(op.body);
+      return json({ content: [{ type: "text", text: JSON.stringify({ legenda: "L", hashtags: [], cenas: [],
+        slides: [{ n: 1, titulo: "Capa", texto: "", usa_imagem: true }, { n: 2, titulo: "Uso", texto: "", usa_imagem: true }],
+        prompts_imagem: [{ slide: 1, prompt: "the product from the reference photo on a bar counter", proporcao: "4:5", produto: true },
+          { slide: 2, prompt: "the person from the reference photo wearing the product from the reference photo", proporcao: "4:5", pessoa: true, produto: true }] }) }], stop_reason: "end_turn" });
+    }
+    if (u.endsWith("/seedream-v4-5-edit") && op.method === "POST") { seedream.push(JSON.parse(op.body)); return json({ data: { task_id: "p" + (++k), status: "CREATED" } }); }
+    if (/\/seedream-v4-5-edit\/p\d/.test(u)) return json({ data: { status: "COMPLETED", generated: ["https://cdn.exemplo/ref.jpg"] } });
+    if (u.startsWith("https://cdn.exemplo/")) return new Response(Buffer.from(JPG, "base64"), { headers: { "content-type": "image/jpeg" } });
+    return original(url, op);
+  };
+  try {
+    assert.equal((await chamar({ acao: "criarPost", id, briefing: { capa: "foto", fundo: "fotos", slides: "2", pessoa: produto } }, ana)).status, 400, "um produto não serve como pessoa");
+    assert.equal((await chamar({ acao: "criarPost", id, briefing: { capa: "foto", fundo: "fotos", slides: "2", pessoa, produto } }, ana)).status, 200);
+    await puxar();
+    for (let n = 0; n < 100; n++) {
+      const st = (await db().query("select status from tarefas where tipo = 'criar' order by criado_em desc limit 1")).rows[0].status;
+      if (st === "feito" || st === "erro") break;
+      await new Promise(r => setTimeout(r, 50));
+    }
+  } finally { globalThis.fetch = original; }
+  const t = (await db().query("select status, erro from tarefas where tipo = 'criar' order by criado_em desc limit 1")).rows[0];
+  assert.equal(t.status, "feito", t.erro || "");
+  assert.match(JSON.stringify(corpoClaude.messages[0].content), /produto ou objeto real: mostre o produto da foto de referência \(Pulseira azul\)/);
+  const url = x => lista.find(y => y.id === x).arquivo.url;
+  const s1 = seedream.find(c => c.reference_images.length === 1), s2 = seedream.find(c => c.reference_images.length === 2);
+  assert.deepEqual(s1.reference_images, [url(produto)]);
+  assert.match(s1.prompt, /Keep the product\/object exactly as in its reference/);
+  assert.deepEqual(s2.reference_images, [url(pessoa), url(produto)]);
+  assert.match(s2.prompt, /^Reference image 1 is the person\. Reference image 2 is the product\/object\./);
+  await chamar({ acao: "removerPessoa", id: produto }, ana); await chamar({ acao: "removerPessoa", id: pessoa }, ana);
+});
