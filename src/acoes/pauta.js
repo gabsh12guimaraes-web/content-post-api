@@ -35,7 +35,7 @@ function limparBriefing(r) {
     slides: r.slides === "auto" ? "auto" : (Number(r.slides) >= 2 && Number(r.slides) <= 10 ? Number(r.slides) : undefined),
     objetivo: um(r.objetivo, ["engajar", "educar", "vender", "institucional"]),
     duracao: [15, 30, 45].includes(Number(r.duracao)) ? Number(r.duracao) : undefined,
-    cenas: r.cenas === "auto" ? "auto" : (Number(r.cenas) >= 2 && Number(r.cenas) <= 8 ? Number(r.cenas) : undefined),
+    cenas: r.cenas === "auto" ? "auto" : (Number(r.cenas) >= 1 && Number(r.cenas) <= 8 ? Number(r.cenas) : undefined),
     textoNaTela: um(r.textoNaTela, ["sim", "nao"]), observacoes: texto(r.observacoes, 1000) || undefined,
     story: um(r.story, ["imagem", "sequencia", "continuo", "varios"]),
     imagens: um(r.imagens, ["ia", "banco", "misto"]),

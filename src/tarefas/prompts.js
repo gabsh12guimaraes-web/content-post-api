@@ -142,7 +142,7 @@ export function briefingTexto(b, formato) {
     if (fundo) L.push('- ' + (formato === 'Estatico' ? fundo.replace('demais slides', 'o post') : fundo));
     if (b.slides && b.slides !== 'auto' && formato !== 'Estatico') L.push('- exatamente ' + Number(b.slides) + ' slides');
   } else {
-    if (b.story === 'continuo') L.push('- story em VÍDEO CONTÍNUO: exatamente 1 cena, sem cortes, com "duracao_s" entre 8 e 10');
+    if (b.story === 'continuo' || Number(b.cenas) === 1) L.push('- ' + (formato === 'Reels' ? 'reels' : 'story') + ' em VÍDEO CONTÍNUO: exatamente 1 cena, sem cortes, com "duracao_s" entre 8 e 10');
     else {
       if (b.story === 'varios') L.push('- story com vários vídeos curtos em sequência');
       if (b.duracao) L.push('- duração total de até ' + Number(b.duracao) + ' segundos');
