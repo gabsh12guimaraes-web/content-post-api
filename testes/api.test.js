@@ -1120,3 +1120,29 @@ test("publicação: reinício no meio não cria o post de novo no Zernio, e vár
   assert.ok(maxSimultaneos >= 2, "os vencidos saem ao mesmo tempo, não um por um");
   for (const id of outros) assert.equal((await db().query("select status from posts where id = $1", [id])).rows[0].status, "Publicado");
 });
+
+test("tentar de novo: post com erro de publicação volta a publicar só o que faltou", async () => {
+  await chamar({ acao: "salvarIntegracao", provedor: "zernio", valor: "sk_zernio_teste_1234" }, ana);
+  const i = (await db().query("insert into ideias (org_id, titulo, formato, rede, score) values ($1, 'Deu erro', 'Estatico', 'Instagram', 7) returning id", [anaOrg])).rows[0].id;
+  const { id } = await chamar({ acao: "agendarIdeia", id: i, data: new Date(Date.now() + 5 * 86400000).toISOString() }, ana);
+  await chamar({ acao: "salvarArtes", id, artes: [{ tipo: "image/jpeg", base64: JPG }] }, ana);
+  assert.equal((await chamar({ acao: "tentarPublicarDeNovo", id }, ana)).status, 400, "sem falha, não tem o que tentar");
+  // saiu no Instagram, falhou no Facebook
+  await db().query("update posts set status = 'Publicado', erro = 'Não publicou em Facebook: x', redes = '{Instagram,Facebook}', links = $2 where id = $1", [id, JSON.stringify({ Instagram: "https://instagram.com/p/ja" })]);
+  const original = globalThis.fetch, criados = [];
+  process.env.ZERNIO_INTERVALO_MS = "5";
+  globalThis.fetch = async (url, op = {}) => {
+    const u = String(url);
+    if (u.endsWith("zernio.com/api/v1/accounts")) return new Response(JSON.stringify({ accounts: [{ _id: "ig", platform: "instagram", isActive: true }, { _id: "fb", platform: "facebook", isActive: true }] }));
+    if (u.endsWith("zernio.com/api/v1/posts") && op.method === "POST") { criados.push(JSON.parse(op.body).platforms[0].platform); return new Response(JSON.stringify({ post: { _id: "zf", status: "published", platforms: [{ status: "published", platformPostUrl: "https://facebook.com/p/novo" }] } })); }
+    return original(url, op);
+  };
+  try {
+    assert.equal((await chamar({ acao: "tentarPublicarDeNovo", id }, ana)).status, 200);
+    for (let k = 0; k < 100; k++) { if ((await db().query("select status from posts where id = $1", [id])).rows[0].status !== "Publicando") break; await new Promise(r => setTimeout(r, 20)); }
+  } finally { globalThis.fetch = original; }
+  const p = (await db().query("select status, erro, links from posts where id = $1", [id])).rows[0];
+  assert.equal(p.status, "Publicado"); assert.equal(p.erro, null);
+  assert.deepEqual(criados, ["facebook"], "o Instagram, que já tinha saído, não foi repetido");
+  assert.equal(p.links.Facebook, "https://facebook.com/p/novo");
+});

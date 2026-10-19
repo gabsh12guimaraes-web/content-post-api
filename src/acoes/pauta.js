@@ -468,6 +468,17 @@ export const acoesPauta = {
     return {};
   },
 
+  // Publicação que falhou (ou saiu só em parte das redes): tenta de novo agora. O que já saiu não é repetido.
+  async tentarPublicarDeNovo(ctx, b) {
+    const p = await postDaOrg(ctx.org, b.id);
+    const parcial = p.status === "Publicado" && p.erro;
+    if (p.status !== "Erro" && !parcial) falha("Este post não tem falha de publicação para tentar de novo.");
+    if (!p.artes_prontas) falha("Gere as artes finais antes de publicar.");
+    const r = await db().query("update posts set status = 'Agendado', erro = null, atualizado_em = now() where id = $1 and org_id = $2 and (status = 'Erro' or (status = 'Publicado' and erro is not null)) returning id", [p.id, ctx.org]);
+    if (!r.rows.length) falha("Este post já está sendo publicado.");
+    if (!(await publicarJa(ctx.org, p.id))) falha("Este post já está sendo publicado.");
+    return {};
+  },
   async publicarAgora(ctx, b) {
     const p = await postDaOrg(ctx.org, b.id);
     if (p.status !== "Agendado") falha("Só posts agendados podem ser publicados agora.");
