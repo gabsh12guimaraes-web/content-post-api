@@ -44,6 +44,12 @@ cp .env.exemplo .env   # preencha CHAVE_MESTRA; DATABASE_URL pode ficar pglite:.
 node --env-file=.env src/servidor.js
 ```
 
+## Primeiro acesso e posts prontos
+
+O primeiro acesso permite analisar o Instagram público e/ou site da marca via Apify + Claude. O resultado fica como rascunho na tarefa `analisarMarca`; os dados da marca só são salvos quando a pessoa revisa e continua. A opção manual segue disponível e não chama provedores.
+
+Em Home ou Calendário, **Enviar post pronto** usa arquivos do banco da própria organização, mantém a ordem e gera somente legenda e hashtags com Claude. Vídeos são analisados por até quatro quadros locais via FFmpeg. Sem diagramação é o padrão; modelos opcionais são aplicados pelo renderizador existente. O post fica em revisão e precisa de aprovação para agendar. A geração da legenda usa um post do plano, devolvido em caso de falha; não chama geração de imagens ou vídeos.
+
 ## Testes
 
 ```bash

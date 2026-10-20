@@ -12,7 +12,7 @@ export async function marcaParaPainel(m) {
   return {
     id: m.org_id, Nome: m.nome, Posicionamento: m.posicionamento, Publico: m.publico, TomDeVoz: m.tom_de_voz,
     Pilares: m.pilares || [], Evitar: m.evitar, Redes: m.redes || [], FrequenciaSemanal: m.frequencia_semanal,
-    ExemplosBons: m.exemplos, Cores: m.cores, Idioma: m.idioma, Perfil: m.perfil,
+    ExemplosBons: m.exemplos, Cores: m.cores, Idioma: m.idioma, Perfil: m.perfil, Site: m.site || "",
     ...Object.fromEntries(LOGOS.map(k => [k, lista((m.logos || {})[k])])),
     MoodBoard: (m.mood_board || []).map(id => a.get(id)).filter(Boolean),
   };
@@ -34,7 +34,7 @@ export async function postsParaPainel(org, posts) {
     const fotos = nf.map(n => a.get(p.fotos[n])).filter(Boolean);
     const clipes = nc.map(n => a.get(p.clipes[n])).filter(Boolean);
     return {
-      id: p.id, Titulo: p.titulo, DataPublicacao: p.data_publicacao, Rede: p.rede, Formato: p.formato, Pilar: p.pilar,
+      id: p.id, Titulo: p.titulo, DataPublicacao: p.data_publicacao, Rede: p.rede, Formato: p.formato, Pilar: p.pilar, Origem: p.origem || "ia",
       Status: p.status, Versao: p.versao, Legenda: p.legenda, Hashtags: p.hashtags, Slides: JSON.stringify(p.slides || []),
       LinkPublicado: p.link_publicado, Erro: p.erro, Redes: (p.redes && p.redes.length ? p.redes : [p.rede]).filter(Boolean), Links: p.links || {}, Publicacao: p.publicacao || {},
       Fotos: fotos, ImagensSlides: JSON.stringify(Object.fromEntries(nf.map(n => [n, (a.get(p.fotos[n]) || {}).url || ""]))),

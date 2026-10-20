@@ -18,6 +18,23 @@ const rodar = (args, ms = 10 * 60000) => new Promise((ok, falha) => {
 let fila = Promise.resolve();
 const umPorVez = fn => { const r = fila.then(fn, fn); fila = r.catch(() => {}); return r; };
 
+// Até quatro quadros pequenos do arquivo local para entender um post pronto, sem alterar o vídeo.
+export function quadrosDoVideo(arq) {
+  return umPorVez(() => new Promise((ok, falha) => {
+    const p = spawn(ffmpeg, ["-hide_banner", "-i", arq, "-vf", "select='isnan(prev_selected_t)+gte(t-prev_selected_t,15)',scale=640:-2", "-fps_mode", "vfr", "-frames:v", "4", "-f", "image2pipe", "-c:v", "mjpeg", "pipe:1"], { stdio: ["ignore", "pipe", "ignore"] });
+    const partes = []; let tamanho = 0;
+    const t = setTimeout(() => { p.kill("SIGKILL"); falha(new Error("Não consegui ler o vídeo a tempo.")); }, 30000);
+    p.stdout.on("data", d => { tamanho += d.length; if (tamanho > 4 * 1024 * 1024) { p.kill("SIGKILL"); return; } partes.push(d); });
+    p.on("error", e => { clearTimeout(t); falha(e); });
+    p.on("close", code => {
+      clearTimeout(t); if (code !== 0) return falha(new Error("Não consegui abrir o vídeo enviado. Exporte em MP4 (H.264) e envie novamente."));
+      const b = Buffer.concat(partes), imagens = []; let inicio = 0;
+      for (let i = 1; i < b.length; i++) if (b[i - 1] === 0xff && b[i] === 0xd9) { imagens.push(b.subarray(inicio, i + 1)); inicio = i + 1; }
+      imagens.length ? ok(imagens) : falha(new Error("O vídeo não contém quadros legíveis."));
+    });
+  }));
+}
+
 async function temAudio(arq) {
   // "ffmpeg -i" sem saída termina com erro, mas lista as trilhas no stderr
   const info = await rodar(["-hide_banner", "-i", arq], 30000).catch(e => e.message);

@@ -6,6 +6,7 @@ import { registrar } from "./fila.js";
 import { SISTEMA_IDEIAS, SISTEMA_POST, SISTEMA_AJUSTE, SISTEMA_ESCOLHA_BANCO, SISTEMA_MODELO, idiomaDe, briefingTexto } from "./prompts.js";
 import { devolver } from "../planos.js";
 import { lerArquivo } from "../arquivos.js";
+import { legendarEnviado } from "./entrada.js";
 
 // Story em imagem estática segue o caminho das fotos (1 imagem vertical); os outros stories e os Reels são vídeo.
 // Story em imagem: uma só ("imagem") ou uma sequência de várias telas ("sequencia"); os dois seguem o caminho das fotos.
@@ -318,6 +319,7 @@ export function aplicarBanco(c, mapa) {
 registrar("criar", Object.assign(async (org, { post: id }) => {
   const post = await postDe(org, id);
   if (!post) return { ignorado: "post removido" };
+  if (post.origem === "envio") return legendarEnviado(org, post);
   const m = await marcaDe(org);
   const ideia = post.ideia_id ? (await db().query("select * from ideias where id = $1", [post.ideia_id])).rows[0] : null;
   const user = [blocoMarca(m), "", "<post>", "titulo: " + post.titulo, "rede: " + (post.rede || ""), "formato: " + (post.formato || ""), "pilar: " + (post.pilar || ""),

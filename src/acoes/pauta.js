@@ -10,6 +10,7 @@ import { podeGerir } from "./conta.js";
 import { publicarJa, REDES_PUBLICACAO, escolherDoBanco } from "../tarefas/trabalhos.js";
 import { redesConectadas } from "../provedores/index.js";
 import { usar, devolver, limiteModelos } from "../planos.js";
+import { perfilInstagram, sitePublico } from "../tarefas/entrada.js";
 
 const LOGOS = ["Logo", "LogoDark", "SimboloLight", "SimboloDark"];
 const STATUS_IDEIA = ["Sugerida", "Aprovada", "Descartada", "Guardada"];
@@ -68,7 +69,7 @@ function limparDiag(d = {}, { modelo = false } = {}) {
     alinhar: um(d.alinhar, ["esquerda", "centro", "direita"]),
     posicao: um(d.posicao, ["auto", "topo", "meio", "base"]),
     ...(d.modelo === "proprio" && UUID.test(String(d.proprio || "")) ? { proprio: String(d.proprio) } : {}),
-    modelo: um(d.modelo, ["foto", "video", "proprio", "editorial", "lateral", "impacto", "minimal", "manchete", "cinema", "grade", "claro", "escuro"]),
+    modelo: um(d.modelo, ["foto", "video", "proprio", "editorial", "lateral", "impacto", "minimal", "manchete", "cinema", "grade", "claro", "escuro", "original"]),
     fonte: um(d.fonte, ["auto", "poppins", "anton", "bebas", "archivo", "playfair", "dmserif"]),
     fundo: um(d.fundo, ["auto", "claro", "escuro", "marca"]),
     v: 3, // versão da diagramação: "auto" no fundo usa o padrão de cada modelo; Reels e Stories têm o modelo "video"
@@ -87,12 +88,29 @@ function limparDiag(d = {}, { modelo = false } = {}) {
   if (modelo && e >= 0.6 && e <= 1.6 && e !== 1) diag.escala = e;
   if (diag.modelo === "proprio" && !diag.proprio) diag.modelo = "foto";
   if (modelo && diag.modelo === "video") diag.modelo = "foto";
+  if (modelo && diag.modelo === "original") diag.modelo = "foto";
   if (modelo) delete diag.audio; // o áudio é escolha de cada post, não do modelo
   return diag;
 }
 const anexosIds = lista => (Array.isArray(lista) ? lista : []).map(a => a && a.id).filter(id => UUID.test(String(id || "")));
 
 export const acoesPauta = {
+  async analisarMarca(ctx, b) {
+    if (!podeGerir(ctx.papel)) falha("Só donos e administradores podem analisar a marca.", 403);
+    const instagram = perfilInstagram(b.instagram), site = sitePublico(b.site);
+    if (!instagram && !site) falha("Informe o Instagram ou o site da marca, ou escolha preencher manualmente.");
+    const ativa = (await db().query("select id, payload from tarefas where org_id = $1 and tipo = 'analisarMarca' and status in ('pendente', 'rodando')", [ctx.org])).rows[0];
+    if (ativa) {
+      if (ativa.payload.instagram !== instagram || ativa.payload.site !== site) falha("Uma análise das páginas anteriores ainda está em andamento. Aguarde terminar ou preencha manualmente.");
+      return { id: ativa.id };
+    }
+    return { id: await enfileirar(ctx.org, "analisarMarca", { instagram, site }, ctx.usuario.id) };
+  },
+  async analiseMarca(ctx, b) {
+    const r = (await db().query("select id, status, erro, payload->'resultado' as resultado from tarefas where id = $1 and org_id = $2 and tipo = 'analisarMarca'", [exigirId(b.id), ctx.org])).rows[0];
+    if (!r) falha("Análise não encontrada.", 404);
+    return r;
+  },
   async listar(ctx) {
     const m = (await db().query("select * from marcas where org_id = $1", [ctx.org])).rows[0];
     const fontes = (await db().query("select * from fontes where org_id = $1 order by nome", [ctx.org])).rows;
@@ -149,7 +167,7 @@ export const acoesPauta = {
 
   async salvarMarca(ctx, b) {
     const c = b.campos || {};
-    const map = { Nome: "nome", Posicionamento: "posicionamento", Publico: "publico", TomDeVoz: "tom_de_voz", Evitar: "evitar", ExemplosBons: "exemplos", Cores: "cores", Idioma: "idioma", Perfil: "perfil" };
+    const map = { Nome: "nome", Posicionamento: "posicionamento", Publico: "publico", TomDeVoz: "tom_de_voz", Evitar: "evitar", ExemplosBons: "exemplos", Cores: "cores", Idioma: "idioma", Perfil: "perfil", Site: "site" };
     const sets = [], vals = [ctx.org];
     const por = (col, v) => { vals.push(v); sets.push(`${col} = $${vals.length}`); };
     for (const [k, col] of Object.entries(map)) if (c[k] !== undefined) por(col, texto(c[k], 5000));
@@ -353,6 +371,50 @@ export const acoesPauta = {
     return {};
   },
 
+  // Usa apenas os arquivos da própria organização, na ordem escolhida. A IA cuida só da legenda.
+  async criarPostPronto(ctx, b) {
+    const pedido = exigirId(b.pedido);
+    const existente = (await db().query("select id from posts where org_id = $1 and pedido_envio = $2", [ctx.org, pedido])).rows[0];
+    if (existente) return existente;
+    const titulo = texto(b.titulo, 300), quando = Date.parse(b.data || "");
+    if (!titulo) falha("Dê um título para identificar a publicação.");
+    if (!quando || quando < Date.now() + 10 * 60000) falha("Escolha uma data e um horário pelo menos 10 minutos no futuro.");
+    if (!["Reels", "Estatico", "Carrossel", "Stories"].includes(b.formato)) falha("Escolha o formato da publicação.");
+    const ids = Array.isArray(b.banco) ? b.banco.map(id => exigirId(id)) : [];
+    if (!ids.length || ids.length > 10 || new Set(ids).size !== ids.length) falha("Escolha de 1 a 10 arquivos, sem repetir.");
+    const itens = (await db().query("select b.id, b.arquivo_id, a.tipo from banco_imagens b join arquivos a on a.id = b.arquivo_id and a.org_id = b.org_id where b.org_id = $1 and b.id = any($2::uuid[])", [ctx.org, ids])).rows;
+    if (itens.length !== ids.length) falha("Um dos arquivos não pertence a esta organização ou foi removido.");
+    const ordenados = ids.map(id => itens.find(i => i.id === id));
+    if (ordenados.some(i => !["image/jpeg", "image/png", "image/webp", "video/mp4"].includes(i.tipo))) falha("Use imagens ou vídeos MP4.");
+    if (b.formato === "Reels" && (ordenados.length !== 1 || ordenados[0].tipo !== "video/mp4")) falha("Para Reels, envie um vídeo.");
+    if (b.formato === "Estatico" && (ordenados.length !== 1 || ordenados[0].tipo === "video/mp4")) falha("Para post estático, envie uma imagem.");
+    if (b.formato === "Carrossel" && ordenados.length < 2) falha("Para carrossel, envie pelo menos dois arquivos.");
+    const redes = [...new Set((Array.isArray(b.redes) ? b.redes : []).filter(r => REDES_PUBLICACAO.includes(r)))];
+    if (!redes.length) falha("Escolha pelo menos uma rede.");
+    let diag = limparDiag(b.diagramacao || { modelo: "original" });
+    if (diag.proprio && !(await db().query("select 1 from modelos_marca where id = $1 and org_id = $2 and status = 'pronto' and spec is not null", [diag.proprio, ctx.org])).rows.length) falha("Modelo não encontrado nesta organização.", 404);
+    const fotos = {}, clipes = {}, slides = [];
+    ordenados.forEach((a, i) => { (a.tipo === "video/mp4" ? clipes : fotos)[i + 1] = a.arquivo_id; slides.push({ n: i + 1, titulo: "", texto: "", usa_imagem: a.tipo !== "video/mp4" }); });
+    const br = { observacoes: texto(b.contexto, 1500), objetivo: texto(b.objetivo, 100) };
+    if (b.formato === "Stories") br.story = ordenados.length > 1 ? "sequencia" : ordenados[0].tipo === "video/mp4" ? "varios" : "imagem";
+    const r = await db().query(`insert into posts (org_id, pedido_envio, origem, titulo, data_publicacao, rede, redes, formato, briefing, diagramacao, fotos, clipes, slides, artes, artes_prontas, status, publicacao)
+      values ($1,$2,'envio',$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'EmCriacao','{"conteudoIa":false}')
+      on conflict (org_id, pedido_envio) where pedido_envio is not null do nothing returning id`,
+    [ctx.org, pedido, titulo, new Date(quando), redes[0], redes, b.formato, JSON.stringify(br), JSON.stringify(diag), JSON.stringify(fotos), JSON.stringify(clipes), JSON.stringify(slides), diag.modelo === "original" ? ordenados.map(a => a.arquivo_id) : [], diag.modelo === "original"]);
+    if (!r.rows.length) return (await db().query("select id from posts where org_id = $1 and pedido_envio = $2", [ctx.org, pedido])).rows[0];
+    const id = r.rows[0].id; let cobrado = false;
+    try { await usar(ctx.org, "post"); cobrado = true; await enfileirar(ctx.org, "criar", { post: id }, ctx.usuario.id); }
+    catch (e) { if (cobrado) await devolver(ctx.org, "post"); await db().query("delete from posts where id = $1 and org_id = $2", [id, ctx.org]); throw e; }
+    return { id };
+  },
+
+  async salvarLegendaPost(ctx, b) {
+    const p = await postDaOrg(ctx.org, b.id);
+    if (p.origem !== "envio" || !["EmRevisao", "Agendado", "Erro"].includes(p.status)) falha("A legenda deste post não pode ser editada agora.");
+    await db().query("update posts set legenda = $3, hashtags = $4, atualizado_em = now() where id = $1 and org_id = $2", [p.id, ctx.org, texto(b.legenda, 2200), texto(b.hashtags, 600)]);
+    return {};
+  },
+
   async removerPost(ctx, b) {
     const p = await postDaOrg(ctx.org, b.id);
     if (p.status === "Publicado") falha("Post publicado não sai do calendário.");
@@ -380,13 +442,22 @@ export const acoesPauta = {
       }
     } catch (e) { await apagarArquivos(ctx.org, ids); throw e; }
     await db().query("update posts set artes = $2, artes_prontas = true, atualizado_em = now() where id = $1", [p.id, ids]);
-    await apagarArquivos(ctx.org, p.artes || []);
+    const fontes = new Set([...Object.values(p.fotos || {}), ...Object.values(p.clipes || {})]);
+    await apagarArquivos(ctx.org, (p.artes || []).filter(id => !fontes.has(id)));
     return { enviadas: ids.length };
   },
 
   async salvarDiagramacao(ctx, b) {
     const p = await postDaOrg(ctx.org, b.id);
+    if (["Publicando", "Publicado"].includes(p.status)) falha("Este post já foi publicado ou está sendo publicado.");
     const diag = limparDiag(b.diagramacao);
+    if (diag.modelo === "original") {
+      if (p.origem !== "envio") falha("Sem diagramação está disponível para posts enviados prontos.");
+      const fontes = { ...p.fotos, ...p.clipes }, ids = Object.keys(fontes).map(Number).sort((a, b) => a - b).map(n => fontes[n]);
+      await db().query("update posts set diagramacao = $2, artes = $3, artes_prontas = true, atualizado_em = now() where id = $1", [p.id, JSON.stringify(diag), ids]);
+      await apagarArquivos(ctx.org, (p.artes || []).filter(id => !ids.includes(id)));
+      return {};
+    }
     await db().query("update posts set diagramacao = $2, artes_prontas = case when $3 then false else artes_prontas end, atualizado_em = now() where id = $1", [p.id, JSON.stringify(diag), !!b.refazer]);
     return {};
   },
@@ -447,6 +518,7 @@ export const acoesPauta = {
 
   async ajustarPost(ctx, b) {
     const p = await postDaOrg(ctx.org, b.id);
+    if (p.origem === "envio") falha("Edite a legenda e as hashtags na revisão. Os arquivos enviados são mantidos.");
     const comentario = texto(b.comentario, 2000);
     if (!comentario) falha("Escreva o que você quer mudar.");
     if (!["EmRevisao", "Agendado"].includes(p.status)) falha("Este post não está em revisão.");
@@ -516,7 +588,7 @@ export const acoesPauta = {
   async criarPost(ctx, b) {
     const p = await postDaOrg(ctx.org, b.id);
     if (!["Planejado", "Erro"].includes(p.status)) falha("Este post já foi criado.");
-    const br = limparBriefing(b.briefing);
+    const br = p.origem === "envio" ? (p.briefing || {}) : limparBriefing(b.briefing);
     if (br.pessoa) {
       const pe = (await db().query("select nome from pessoas where id = $1 and org_id = $2 and tipo = 'pessoa'", [br.pessoa, ctx.org])).rows[0];
       if (!pe) falha("Essa pessoa não está mais cadastrada. Escolha outra ou envie a foto de novo.");
