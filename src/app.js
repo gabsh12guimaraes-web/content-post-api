@@ -14,10 +14,12 @@ import { ErroIntegracao } from "./provedores/index.js";
 import { relatorioCsv, chaveRelatorioOk } from "./relatorio.js";
 import { painelAdmin } from "./admin.js";
 import { catalogo, situacao, assinaturaKiwifyOk, avisoKiwify } from "./planos.js";
+import { midiasLogin, arquivoLogin } from "./vitrine.js";
 
-const PUBLICAS = new Set(["cadastrar", "entrar", "verConvite", "planos"]);
+const PUBLICAS = new Set(["cadastrar", "entrar", "verConvite", "planos", "vitrineLogin"]);
 const SEM_ORG = new Set(["eu", "sair", "trocarSenha", "aceitarConvite", "criarOrganizacao", "trocarOrganizacao", "painelAdmin"]);
 const acoesPlano = {
+  async vitrineLogin() { return { midias: await midiasLogin() }; },
   async planos() { return catalogo(); },
   // Painel admin da plataforma (só ADMIN_EMAILS).
   painelAdmin,
@@ -100,6 +102,21 @@ export async function criarApp() {
       return rep.code(206).header("content-range", `bytes ${ini}-${fim}/${total}`).header("content-length", fim - ini + 1).send(lerPedaco(a.arq, ini, fim));
     }
     return rep.header("content-length", total).send(lerPedaco(a.arq, 0, Math.max(0, total - 1)));
+  });
+
+  app.get("/vitrine/:id", { compress: false }, async (req, rep) => {
+    if (!UUID.test(req.params.id)) return rep.code(404).send("não encontrado");
+    const item = await arquivoLogin(req.params.id); if (!item) return rep.code(404).send("não encontrado");
+    const a = await infoArquivo(item.id, item.chave, { previa: req.query.v === "p" });
+    if (!a) return rep.code(404).send("não encontrado");
+    rep.header("content-type", a.tipo).header("cache-control", "public, max-age=60").header("accept-ranges", "bytes").header("access-control-allow-origin", "*");
+    const m = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range || "")), total = a.tamanho;
+    if (m && (m[1] || m[2])) {
+      const ini = m[1] ? Number(m[1]) : Math.max(0, total - Number(m[2])), fim = m[1] && m[2] ? Math.min(Number(m[2]), total - 1) : total - 1;
+      if (ini >= total || ini > fim) return rep.code(416).header("content-range", `bytes */${total}`).send();
+      return rep.code(206).header("content-range", `bytes ${ini}-${fim}/${total}`).header("content-length", fim - ini + 1).send(lerPedaco(a.arq, ini, fim));
+    }
+    return rep.header("content-length", total).send(lerPedaco(a.arq, 0, total - 1));
   });
 
   app.post("/api", async (req, rep) => {

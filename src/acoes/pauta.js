@@ -11,6 +11,7 @@ import { publicarJa, REDES_PUBLICACAO, escolherDoBanco } from "../tarefas/trabal
 import { redesConectadas } from "../provedores/index.js";
 import { usar, devolver, limiteModelos } from "../planos.js";
 import { perfilInstagram, sitePublico } from "../tarefas/entrada.js";
+import { ehAdmin } from "../admin.js";
 
 const LOGOS = ["Logo", "LogoDark", "SimboloLight", "SimboloDark"];
 const STATUS_IDEIA = ["Sugerida", "Aprovada", "Descartada", "Guardada"];
@@ -95,6 +96,18 @@ function limparDiag(d = {}, { modelo = false } = {}) {
 const anexosIds = lista => (Array.isArray(lista) ? lista : []).map(a => a && a.id).filter(id => UUID.test(String(id || "")));
 
 export const acoesPauta = {
+  async exemplosIdeia(ctx, b) {
+    const i = (await db().query("select id, exemplos, exemplos_em from ideias where id = $1 and org_id = $2", [exigirId(b.id), ctx.org])).rows[0];
+    if (!i) falha("Ideia não encontrada.", 404);
+    if (!b.atualizar && i.exemplos_em && Date.now() - new Date(i.exemplos_em).getTime() < 7 * 86400000) return { status: "feito", resultado: { exemplos: i.exemplos, aviso: i.exemplos.length ? "" : "Nenhum exemplo relacionado disponível na última busca." } };
+    const ativa = (await db().query("select id from tarefas where org_id = $1 and tipo = 'exemplosIdeia' and payload->>'ideia' = $2 and status in ('pendente', 'rodando')", [ctx.org, i.id])).rows[0];
+    return { status: "pendente", id: ativa?.id || await enfileirar(ctx.org, "exemplosIdeia", { ideia: i.id }, ctx.usuario.id) };
+  },
+  async resultadoExemplos(ctx, b) {
+    const t = (await db().query("select id, status, erro, payload->'resultado' as resultado from tarefas where id = $1 and org_id = $2 and tipo = 'exemplosIdeia'", [exigirId(b.id), ctx.org])).rows[0];
+    if (!t) falha("Busca não encontrada.", 404);
+    return t;
+  },
   async analisarMarca(ctx, b) {
     if (!podeGerir(ctx.papel)) falha("Só donos e administradores podem analisar a marca.", 403);
     const instagram = perfilInstagram(b.instagram), site = sitePublico(b.site);
@@ -242,7 +255,13 @@ export const acoesPauta = {
     const { rows } = await db().query("select * from banco_imagens where org_id = $1 order by criado_em desc", [ctx.org]);
     const a = await anexos(ctx.org, rows.map(r => r.arquivo_id));
     const tarefas = (await db().query("select payload->>'imagem' as id from tarefas where org_id = $1 and tipo = 'descreverImagem' and status in ('pendente', 'rodando')", [ctx.org])).rows.map(r => r.id);
-    return { imagens: rows.map(r => ({ id: r.id, nome: r.nome, descricao: r.descricao, tags: r.tags || [], origem: r.origem || "envio", post: r.post_id || null, arquivo: a.get(r.arquivo_id) || null, descrevendo: tarefas.includes(r.id) })).filter(x => x.arquivo) };
+    return { podeVitrine: ehAdmin(ctx.usuario.email) && podeGerir(ctx.papel), imagens: rows.map(r => ({ id: r.id, nome: r.nome, descricao: r.descricao, tags: r.tags || [], origem: r.origem || "envio", publicoLogin: r.publico_login, post: r.post_id || null, arquivo: a.get(r.arquivo_id) || null, descrevendo: tarefas.includes(r.id) })).filter(x => x.arquivo) };
+  },
+  async publicarMidiaLogin(ctx, b) {
+    if (!ehAdmin(ctx.usuario.email) || !podeGerir(ctx.papel)) falha("Só a administração da plataforma pode selecionar mídias para o login.", 403);
+    const r = await db().query("update banco_imagens set publico_login = $3 where id = $1 and org_id = $2 and origem = 'ia' returning id", [exigirId(b.id), ctx.org, b.publicar === true]);
+    if (!r.rows.length) falha("Selecione uma mídia gerada por IA desta organização.", 404);
+    return {};
   },
   async enviarImagemBanco(ctx, b) {
     if (!["image/png", "image/jpeg", "image/webp", "video/mp4"].includes(b.tipo)) falha("Envie fotos em JPG, PNG ou WEBP, ou vídeos em MP4.");

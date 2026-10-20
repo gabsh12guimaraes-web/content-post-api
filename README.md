@@ -50,6 +50,12 @@ O primeiro acesso permite analisar o Instagram público e/ou site da marca via A
 
 Em Home ou Calendário, **Enviar post pronto** usa arquivos do banco da própria organização, mantém a ordem e gera somente legenda e hashtags com Claude. Vídeos são analisados por até quatro quadros locais via FFmpeg. Sem diagramação é o padrão; modelos opcionais são aplicados pelo renderizador existente. O post fica em revisão e precisa de aprovação para agendar. A geração da legenda usa um post do plano, devolvido em caso de falha; não chama geração de imagens ou vídeos.
 
+## Ideias e vitrine do login
+
+Os detalhes das ideias ficam em **Ver mais**. **Ver exemplos** mostra até três publicações reais de Instagram/TikTok, usando referências da ideia e, quando necessário, uma busca por temas relacionados via Claude e Apify. Os resultados ficam em cache por sete dias e podem ser atualizados pelo botão do pop-up. A busca não cria posts nem consome a quantidade de posts do plano; o consumo dos provedores é registrado normalmente.
+
+Para usar mídia do banco na vitrine pública do login, um administrador da plataforma (`ADMIN_EMAILS`) abre **Banco de imagens › Editar** e marca **Exibir esta mídia na tela de login**. Só itens gerados por IA da organização atual podem ser selecionados. A rota pública `/vitrine/:id` confere essa seleção a cada acesso e não divulga as URLs privadas da biblioteca. Até oito itens selecionados são usados; enquanto não houver seleção, o painel mostra as mídias de demonstração já incluídas no site. Mídias selecionadas não são removidas pela limpeza automática do banco.
+
 ## Testes
 
 ```bash

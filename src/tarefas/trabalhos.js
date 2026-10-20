@@ -7,6 +7,7 @@ import { SISTEMA_IDEIAS, SISTEMA_POST, SISTEMA_AJUSTE, SISTEMA_ESCOLHA_BANCO, SI
 import { devolver } from "../planos.js";
 import { lerArquivo } from "../arquivos.js";
 import { legendarEnviado } from "./entrada.js";
+import "./exemplos.js";
 
 // Story em imagem estática segue o caminho das fotos (1 imagem vertical); os outros stories e os Reels são vídeo.
 // Story em imagem: uma só ("imagem") ou uma sequência de várias telas ("sequencia"); os dois seguem o caminho das fotos.
@@ -172,7 +173,7 @@ export async function guardarNoBanco(org, arquivo, { nome, descricao, video, pos
     const tipo = video ? "video/%" : "image/%", limite = video ? LIMITE_BANCO_IA.video : LIMITE_BANCO_IA.imagem;
     const { rows } = await db().query(`delete from banco_imagens where id in (
         select b.id from banco_imagens b join arquivos a on a.id = b.arquivo_id
-        where b.org_id = $1 and b.origem = 'ia' and a.tipo like $2
+        where b.org_id = $1 and b.origem = 'ia' and not b.publico_login and a.tipo like $2
           and not exists (select 1 from posts p where p.org_id = $1 and (
             exists (select 1 from jsonb_each_text(p.fotos) f where f.value = b.arquivo_id::text) or
             exists (select 1 from jsonb_each_text(p.clipes) c where c.value = b.arquivo_id::text)))
