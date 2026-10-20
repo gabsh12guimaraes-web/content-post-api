@@ -1,10 +1,11 @@
-// Planos, limites de uso e assinatura pela Kiwify.
-// Os preços precisam ser iguais aos dos produtos criados na Kiwify (o cálculo está em PRECOS.md).
-// "de" é o preço do produto na Kiwify; "cupom" é o desconto (%) do cupom PLANOCICLO (ex.: ESSENCIALMENSAL),
-// que já vai no link do checkout. O preço cobrado é o "de" com o cupom, e o "de" aparece riscado.
+// Planos e limites de uso. Novas compras pela Nasten; callbacks Kiwify preservados para assinaturas anteriores.
+// Os preços precisam ser iguais aos dos produtos criados na Nasten (o cálculo está em PRECOS.md).
+// "de" é o preço do produto; "cupom" é o desconto (%) do cupom PLANOCICLO (ex.: ESSENCIALMENSAL),
+// exibido para copiar e aplicar no checkout. O preço anunciado considera o cupom, com o "de" riscado.
 import crypto from "node:crypto";
 import { db } from "./db.js";
 import { ErroApi } from "./erros.js";
+import { CHECKOUT_NASTEN } from "./ofertas.js";
 
 const env = process.env;
 
@@ -26,10 +27,12 @@ export const cobrancaLigada = () => env.COBRANCA === "sim";
 const lerJson = nome => { try { return JSON.parse(env[nome] || "{}"); } catch (e) { return {}; } };
 export const isentos = () => (env.EMAILS_ISENTOS || "").split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
 
-// Links de checkout da Kiwify: KIWIFY_CHECKOUT = {"essencial:mensal": "https://pay.kiwify.com.br/...", ...}. O cupom entra no link (?coupon=).
+// KIWIFY_CHECKOUT não é usado nos novos checkouts, mesmo que ainda esteja configurado no Railway.
 const comCupom = (u, codigo) => { if (!u) return null; try { const x = new URL(u); if (codigo) x.searchParams.set("coupon", codigo); return x.toString(); } catch (e) { return null; } };
 export function catalogo() {
-  const links = lerJson("KIWIFY_CHECKOUT");
+  // Publicar o receptor antes de virar o checkout permite configurar e validar a Nasten sem interromper vendas.
+  const nasten = env.PAGAMENTOS_PROVEDOR === "nasten";
+  const links = nasten ? { ...CHECKOUT_NASTEN, ...lerJson("NASTEN_CHECKOUT") } : lerJson("KIWIFY_CHECKOUT");
   return {
     planos: Object.entries(PLANOS).filter(([, p]) => p.precos).map(([id, p]) => ({
       id, nome: p.nome, posts: p.posts, ideias: p.ideias, modelos: p.modelos,
@@ -38,7 +41,8 @@ export function catalogo() {
         return { ciclo, meses: CICLOS[ciclo], porMes, dePorMes: p.de[ciclo], desconto: p.cupom[ciclo] || 0, cupom, total: totalDo(p, ciclo), checkout: comCupom(links[`${id}:${ciclo}`], cupom) };
       }),
     })),
-    afiliados: env.KIWIFY_AFILIADOS || null,
+    provedor: nasten ? "nasten" : "kiwify",
+    afiliados: nasten ? env.NASTEN_AFILIADOS || "https://easycontentpost.com.br/afiliados" : env.KIWIFY_AFILIADOS || null,
     teste: { posts: PLANOS.teste.posts, dias: 7 },
   };
 }
@@ -140,7 +144,7 @@ const emCentavos = v => {
 const valoresDa = c => { const m = c.Commissions || {}; return { pago: emCentavos(m.charge_amount ?? m.product_base_price), liquido: emCentavos(m.my_commission ?? m.settlement_amount) }; };
 async function guardarValores(org, c) {
   const v = valoresDa(c);
-  if (org && (v.pago || v.liquido)) await db().query("update organizacoes set pago_centavos = coalesce($2, pago_centavos), liquido_centavos = coalesce($3, liquido_centavos) where id = $1", [org, v.pago, v.liquido]);
+  if (org && (v.pago || v.liquido)) await db().query("update organizacoes set pago_centavos = coalesce($2, pago_centavos), liquido_centavos = coalesce($3, liquido_centavos) where id = $1 and pagamento_provedor is distinct from 'nasten'", [org, v.pago, v.liquido]);
 }
 export async function avisoKiwify(c) {
   const evento = String(c.webhook_event_type || c.order_status || "").toLowerCase();
@@ -148,10 +152,12 @@ export async function avisoKiwify(c) {
   const sub = c.Subscription || {};
   const pago = ["order_approved", "subscription_renewed", "paid", "approved"].includes(evento);
   const chave = `${pedido}|${evento}|${sub.charges ? JSON.stringify(sub.charges).length : ""}|${c.approved_date || c.updated_at || ""}`;
+  const org = await orgDoPedido(c);
+  // Inclui o reenvio de valores de uma cobrança antiga: não sobrescreve a receita da Nasten.
+  if (org && (await db().query("select pagamento_provedor from organizacoes where id = $1", [org])).rows[0]?.pagamento_provedor === "nasten") return { resultado: "ignorado: organização migrada para Nasten" };
   const ja = (await db().query("select 1 from kiwify_eventos where chave = $1", [chave])).rows[0];
   // Aviso repetido não mexe no plano, mas ainda grava o valor pago (reenviar o aviso na Kiwify corrige uma venda antiga).
   if (ja) { if (pago) await guardarValores(await orgDoPedido(c), c); return { repetido: true }; }
-  const org = await orgDoPedido(c);
   let resultado = "ignorado";
   if (org) {
     const estorno = ["order_refunded", "chargeback", "refunded", "chargedback"].includes(evento);
@@ -163,13 +169,13 @@ export async function avisoKiwify(c) {
         const prox = Date.parse(sub.next_payment || "");
         const ate = prox && prox > Date.now() ? new Date(prox) : new Date(Date.now() + CICLOS[pc.ciclo] * 30.5 * 86400000);
         ate.setDate(ate.getDate() + 3);
-        await db().query("update organizacoes set plano = $2, ciclo = $3, plano_ate = $4, kiwify_assinatura = coalesce($5, kiwify_assinatura) where id = $1",
-          [org, pc.plano, pc.ciclo, ate, sub.id || null]);
+        await db().query("update organizacoes set plano = $2, ciclo = $3, plano_ate = $4, kiwify_assinatura = coalesce($5, kiwify_assinatura), pagamento_provedor = 'kiwify', pagamento_id = $6 where id = $1 and pagamento_provedor is distinct from 'nasten'",
+          [org, pc.plano, pc.ciclo, ate, sub.id || null, pedido || null]);
         await guardarValores(org, c);
         resultado = `ativado ${pc.plano}:${pc.ciclo} até ${ate.toISOString().slice(0, 10)}`;
       } else resultado = "produto sem plano";
     } else if (estorno) {
-      await db().query("update organizacoes set plano_ate = now() where id = $1", [org]);
+      await db().query("update organizacoes set plano_ate = now() where id = $1 and pagamento_provedor is distinct from 'nasten'", [org]);
       resultado = "encerrado (estorno)";
     } else if (cancelado) resultado = "cancelado: segue até o fim do período pago";
   } else resultado = "organização não encontrada";

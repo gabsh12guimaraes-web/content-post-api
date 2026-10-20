@@ -6,6 +6,7 @@ import { iniciarTrabalhador } from "./tarefas/fila.js";
 import { publicarVencidos, destravarPublicando } from "./tarefas/trabalhos.js";
 import { tratarAntigos } from "./arquivos.js";
 import "./tarefas/importar.js";
+import { processarEventosNasten, reconciliarNasten } from "./nasten.js";
 
 config.chaveMestra(); // falha logo se a CHAVE_MESTRA não estiver configurada
 await conectar();
@@ -17,6 +18,7 @@ if (config.trabalhador) {
   // Neste servidor nada está publicando ao ligar: o que ficou "Publicando" (reinício no meio) volta para a fila já,
   // e o id do Zernio guardado evita publicar de novo.
   await destravarPublicando(0);
-  await iniciarTrabalhador([{ cada: 300000, fn: () => destravarPublicando(30) }, { cada: 60000, fn: publicarVencidos }, { cada: 60000, fn: () => tratarAntigos(20) }]);
+  await iniciarTrabalhador([{ cada: 300000, fn: () => destravarPublicando(30) }, { cada: 60000, fn: publicarVencidos }, { cada: 60000, fn: () => tratarAntigos(20) }, { cada: 30000, fn: processarEventosNasten }, { cada: 900000, fn: reconciliarNasten }]);
+  processarEventosNasten().catch(e => console.error("[nasten]", e.message));
   console.log("Trabalhador ligado: fila de tarefas e publicação agendada.");
 }

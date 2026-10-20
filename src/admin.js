@@ -4,6 +4,7 @@ import { db } from "./db.js";
 import { PLANOS, CICLOS, totalDo, isentos, inicioDoMes } from "./planos.js";
 import { CUSTO, KIWIFY, DOLAR, custoDe } from "./custos.js";
 import { ErroApi } from "./erros.js";
+import { config } from "./config.js";
 
 const admins = () => (process.env.ADMIN_EMAILS || "gabsh12guimaraes@gmail.com").split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
 export const ehAdmin = email => admins().includes(String(email || "").toLowerCase());
@@ -17,27 +18,29 @@ export async function painelAdmin(ctx) {
   const agora = new Date(), inicioMes = inicioDoMes(agora);
   const d30 = new Date(agora.getTime() - 30 * 86400000), d7 = new Date(agora.getTime() - 7 * 86400000);
   const q = async (sql, p = []) => (await db().query(sql, p)).rows;
+  const [avisosPagamento] = await q("select count(*) filter (where status <> 'feito')::int as pendentes, max(recebido_em) as ultimo from nasten_eventos");
 
   // ---------- usuários e organizações
   const [u] = await q(`select count(*)::int as total, count(*) filter (where criado_em >= $1)::int as novos7, count(*) filter (where criado_em >= $2)::int as novos30,
       count(*) filter (where ultimo_acesso >= $1)::int as ativos7, count(*) filter (where ultimo_acesso >= $2)::int as ativos30 from usuarios`, [d7, d30]);
   const novosPorDia = await q("select to_char(criado_em at time zone 'UTC', 'YYYY-MM-DD') as dia, count(*)::int as n from usuarios where criado_em >= $1 group by 1", [d30]);
-  const orgs = await q(`select o.id, o.nome, o.plano, o.ciclo, o.plano_ate, o.criado_em, o.pago_centavos, o.liquido_centavos,
+  const orgs = await q(`select o.id, o.nome, o.plano, o.ciclo, o.plano_ate, o.criado_em, o.pago_centavos, o.liquido_centavos, o.pagamento_provedor,
       exists (select 1 from membros m join usuarios us on us.id = m.usuario_id where m.org_id = o.id and m.papel = 'dono' and lower(us.email) = any($1::text[])) as isenta
     from organizacoes o`, [isentos()]);
   const situacao = o => (o.isenta ? "isenta" : o.plano !== "teste" ? (new Date(o.plano_ate) > agora ? "assinante" : "vencida") : (new Date(o.plano_ate) > agora ? "teste" : "teste_vencido"));
   const porSituacao = { assinante: 0, teste: 0, teste_vencido: 0, vencida: 0, isenta: 0 };
   const porPlano = {};
-  let mrr = 0, taxasMes = 0;
+  let mrr = 0, taxasMes = 0, taxasPendentes = 0;
   const receitaOrg = new Map();
   for (const o of orgs) {
     const s = situacao(o); porSituacao[s]++;
     if (s === "assinante") {
       const p = PLANOS[o.plano], meses = CICLOS[o.ciclo] || 1;
-      // Valor real da última cobrança (com cupom e taxas, como a Kiwify mostra); sem ele, o preço de tabela.
+      // Usa o líquido real do provedor. A estimativa Kiwify fica restrita às vendas anteriores.
       const tabela = p && p.de && CICLOS[o.ciclo] ? totalDo(p, o.ciclo) : 0;
       const total = o.pago_centavos ? o.pago_centavos / 100 : tabela;
-      const liquido = o.liquido_centavos ? o.liquido_centavos / 100 : total ? total - (total * KIWIFY.taxa + KIWIFY.fixa) : 0;
+      const liquido = o.liquido_centavos != null ? o.liquido_centavos / 100 : o.pagamento_provedor === "nasten" ? total : total ? total - (total * KIWIFY.taxa + KIWIFY.fixa) : 0;
+      if (o.pagamento_provedor === "nasten" && o.liquido_centavos == null) taxasPendentes++;
       mrr += total / meses; taxasMes += (total - liquido) / meses;
       receitaOrg.set(o.id, liquido / meses);
       const k = `${p ? p.nome : o.plano} ${o.ciclo || ""}`.trim(); porPlano[k] = (porPlano[k] || 0) + 1;
@@ -90,10 +93,10 @@ export async function painelAdmin(ctx) {
   }).sort((a, b) => b.custoUsd30 - a.custoUsd30).slice(0, 25);
 
   return {
-    precos: CUSTO, ...arred({
+    precos: CUSTO, pagamentos: { provedor: "Nasten", urlWebhook: config.urlPublica + "/nasten", chavePublica: !!process.env.NASTEN_PUBLIC_KEY, chaveSecreta: !!process.env.NASTEN_SECRET_KEY, webhook: !!process.env.NASTEN_WEBHOOK_SECRET, ...avisosPagamento }, ...arred({
     geradoEm: agora.toISOString(), dolar: DOLAR,
     usuarios: { ...u, organizacoes: orgs.length, porSituacao, porPlano, novosPorDia: Object.keys(serie).map(d => ({ dia: d, n: (novosPorDia.find(x => x.dia === d) || { n: 0 }).n })) },
-    receita: { mrrBrl: mrr, taxasKiwifyMesBrl: taxasMes, liquidaMesBrl: mrr - taxasMes },
+    receita: { mrrBrl: mrr, taxasPagamentoMesBrl: taxasMes, taxasKiwifyMesBrl: taxasMes, taxasPendentes, liquidaMesBrl: mrr - taxasMes },
     custos: { periodos, railwayUsdMes, orgsAtivas, custoMesUsd, custoMesBrl: custoMesUsd * DOLAR, margemMesBrl: mrr - taxasMes - custoMesUsd * DOLAR },
     serie: Object.entries(serie).map(([d, v]) => ({ dia: d, ...v })),
     porTipo: Object.values(porTipo).sort((a, b) => b.usd - a.usd),

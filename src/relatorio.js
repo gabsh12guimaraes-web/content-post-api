@@ -10,7 +10,7 @@ export const COLUNAS = [
   ["nome", "Nome"], ["email", "E-mail"], ["cadastrado_em", "Cadastro"], ["ultimo_acesso", "Último acesso"],
   ["organizacao", "Organização"], ["papel", "Papel"], ["pessoas_na_org", "Pessoas na organização"], ["org_criada_em", "Organização criada em"],
   ["situacao", "Situação"], ["assinante", "Assinou"], ["plano", "Plano"], ["ciclo", "Ciclo"], ["pago_ate", "Pago até"],
-  ["valor_ciclo", "Valor do ciclo (R$)"], ["valor_mensal", "Valor por mês (R$)"], ["ultimo_evento_kiwify", "Último aviso da Kiwify"],
+  ["valor_ciclo", "Valor do ciclo (R$)"], ["valor_mensal", "Valor por mês (R$)"], ["ultimo_evento_pagamento", "Último aviso de pagamento"],
   ["posts_total", "Posts criados (total)"], ["posts_mes", "Posts criados no mês"], ["limite_posts", "Limite de posts/mês"],
   ["buscas_ideias_total", "Buscas de ideias (total)"], ["buscas_ideias_mes", "Buscas de ideias no mês"],
   ["ideias", "Ideias geradas"], ["posts_publicados", "Posts publicados"], ["posts_agendados", "Posts na fila"],
@@ -54,7 +54,7 @@ export async function linhasRelatorio() {
   const membros = await porOrg("select org_id, count(*) as n from membros group by org_id");
   const banco = await porOrg("select org_id, count(*) as n from banco_imagens where origem = 'envio' group by org_id");
   const rostos = await porOrg("select org_id, count(*) as n from pessoas group by org_id");
-  const kiwify = await porOrg("select distinct on (org_id) org_id, evento, recebido_em from kiwify_eventos where org_id is not null order by org_id, recebido_em desc");
+  const pagamentos = await porOrg("select distinct on (org_id) org_id, evento, recebido_em from (select org_id, 'Kiwify: ' || evento as evento, recebido_em from kiwify_eventos union all select org_id, 'Nasten: ' || evento as evento, recebido_em from nasten_eventos) e where org_id is not null order by org_id, recebido_em desc");
   const donosIsentos = new Set((await db().query(
     "select m.org_id from membros m join usuarios u on u.id = m.usuario_id where m.papel = 'dono' and lower(u.email) = any($1::text[])", [isentos()])).rows.map(r => r.org_id));
   const zero = { posts: 0, posts_mes: 0, ideias: 0, ideias_mes: 0, chamadas: 0, entrada: 0, saida: 0, cache_leitura: 0, cache_escrita: 0, fotos: 0, fotos_pessoa: 0, segundos: 0, propria: false, publicados: 0, fila: 0, n: 0 };
@@ -65,7 +65,7 @@ export async function linhasRelatorio() {
     const ativo = temOrg && new Date(p.plano_ate) > new Date();
     const isenta = temOrg && donosIsentos.has(p.org);
     const situacao = !temOrg ? "sem organização" : isenta ? "isenta" : pago ? (ativo ? "assinante ativo" : "assinatura vencida") : (ativo ? "teste grátis" : "teste vencido");
-    const u = de(uso, p.org), c = de(consumo, p.org), cm = de(consumoMes, p.org), po = de(posts, p.org), k = kiwify.get(p.org);
+    const u = de(uso, p.org), c = de(consumo, p.org), cm = de(consumoMes, p.org), po = de(posts, p.org), k = pagamentos.get(p.org);
     // valor real pago na última cobrança (com cupom); sem ele, o preço de tabela
     const valorCiclo = pago && CICLOS[p.ciclo] ? (p.pago_centavos ? p.pago_centavos / 100 : plano.de ? totalDo(plano, p.ciclo) : 0) : 0;
     return {
@@ -73,7 +73,7 @@ export async function linhasRelatorio() {
       organizacao: p.organizacao || "", papel: p.papel || "", pessoas_na_org: temOrg ? de(membros, p.org).n : "", org_criada_em: dataIso(p.org_criada_em),
       situacao, assinante: pago ? "sim" : "não", plano: temOrg ? plano.nome : "", ciclo: p.ciclo || "", pago_ate: temOrg ? dataIso(p.plano_ate) : "",
       valor_ciclo: valorCiclo ? dinheiro(valorCiclo) : "", valor_mensal: valorCiclo ? dinheiro(valorCiclo / CICLOS[p.ciclo]) : "",
-      ultimo_evento_kiwify: k ? `${k.evento} em ${dataIso(k.recebido_em)}` : "",
+      ultimo_evento_pagamento: k ? `${k.evento} em ${dataIso(k.recebido_em)}` : "",
       posts_total: u.posts, posts_mes: u.posts_mes, limite_posts: temOrg ? plano.posts : "", buscas_ideias_total: u.ideias, buscas_ideias_mes: u.ideias_mes,
       ideias: de(ideias, p.org).n, posts_publicados: po.publicados, posts_agendados: po.fila,
       chamadas_claude: c.chamadas, tokens_entrada: c.entrada, tokens_saida: c.saida, tokens_cache: Number(c.cache_leitura) + Number(c.cache_escrita),

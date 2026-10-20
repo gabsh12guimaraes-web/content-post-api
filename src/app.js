@@ -15,6 +15,7 @@ import { relatorioCsv, chaveRelatorioOk } from "./relatorio.js";
 import { painelAdmin } from "./admin.js";
 import { catalogo, situacao, assinaturaKiwifyOk, avisoKiwify } from "./planos.js";
 import { midiasLogin, arquivoLogin } from "./vitrine.js";
+import { assinaturaNastenOk, receberAvisoNasten } from "./nasten.js";
 
 const PUBLICAS = new Set(["cadastrar", "entrar", "verConvite", "planos", "vitrineLogin"]);
 const SEM_ORG = new Set(["eu", "sair", "trocarSenha", "aceitarConvite", "criarOrganizacao", "trocarOrganizacao", "painelAdmin"]);
@@ -62,7 +63,7 @@ export async function criarApp() {
   await app.register(compress, { global: true, threshold: 1024, encodings: ["br", "gzip"], brotliOptions: { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 4 } } });
   await app.register(cors, { origin: config.origens, methods: ["GET", "POST", "OPTIONS"], allowedHeaders: ["content-type", "x-pauta-token", "authorization"], maxAge: 600 });
 
-  // Guarda o corpo bruto para conferir a assinatura da Kiwify.
+  // Guarda o corpo bruto: as assinaturas dos provedores usam exatamente os bytes recebidos.
   app.addContentTypeParser("application/json", { parseAs: "string" }, (req, corpo, pronto) => {
     req.corpoBruto = corpo;
     if (!corpo) return pronto(null, {});
@@ -70,6 +71,14 @@ export async function criarApp() {
   });
 
   app.get("/saude", async () => ({ ok: true }));
+
+  app.post("/nasten", { bodyLimit: 256 * 1024 }, async (req, rep) => {
+    // A Nasten testa a URL sem assinatura durante o cadastro. Esse ping não processa pagamentos.
+    if (req.body?.test === true && Object.keys(req.body).length === 1) return { ok: true, teste: true };
+    if (!assinaturaNastenOk(req.corpoBruto, req.headers["signature-hmac"])) return rep.code(401).send({ ok: false });
+    try { return rep.code(202).send({ ok: true, ...(await receberAvisoNasten(req.body)) }); }
+    catch (e) { return rep.code(e instanceof ErroApi ? e.status : 500).send({ ok: false }); }
+  });
 
   // Relatório de controle para a planilha do Google (IMPORTDATA). Só existe com RELATORIO_CHAVE configurada.
   app.get("/relatorio.csv", async (req, rep) => {

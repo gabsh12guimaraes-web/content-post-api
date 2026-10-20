@@ -67,3 +67,13 @@ Usam Postgres embutido (PGlite) e simulam as APIs externas. Nada é cobrado.
 ## Segredos
 
 Nenhuma chave, senha ou token fica neste repositório. Senhas das pessoas: hash scrypt. Sessões e convites: só o hash SHA-256 do token. Chaves das integrações: cifradas com a `CHAVE_MESTRA`, que existe só nas variáveis do Railway.
+
+## Pagamentos pela Nasten
+
+Veja o passo a passo em [NASTEN.md](NASTEN.md). A virada do painel ocorre com `PAGAMENTOS_PROVEDOR=nasten`; até lá, o catálogo usa os links Kiwify atuais. Com essa variável, as novas compras usam os nove checkouts Nasten, os mesmos preços/cupons e os novos convites de afiliados. `KIWIFY_CHECKOUT` e `KIWIFY_AFILIADOS` antigos deixam de definir os links do painel. Os planos já pagos não são removidos e `/kiwify` permanece para os avisos das compras anteriores; esses avisos não alteram uma organização que já comprou na Nasten.
+
+`POST /nasten` valida o HMAC-SHA256 de `signature-hmac` com o corpo bruto e grava o evento antes de responder `202`. O teste exato `{"test":true}` responde `200` sem processar nada. A fila confirma a venda em `GET /v1/transactions/{id}`, confere a empresa e associa a organização pelo `sck` mais o e-mail de um membro; sem `sck`, só aceita um e-mail que seja dono de exatamente uma organização. Compra anterior ao cadastro fica pendente e volta a ser conferida. Nunca escolhe uma organização arbitrária quando há várias.
+
+A liberação é idempotente por transação, preserva o acesso no cancelamento até o fim do período e não deixa avisos antigos substituírem uma compra mais recente. Estornos só encerram o acesso quando pertencem à cobrança que sustenta o plano atual. Valores do painel financeiro vêm do `amount` e `netAmount` reais da Nasten, sem aplicar a taxa histórica da Kiwify às novas compras.
+
+Com o trabalhador ligado, eventos pendentes são retomados a cada 30 segundos. A cada 15 minutos há conciliação das vendas dos últimos 30 dias (até 500 por execução) e de 20 pagamentos antigos, em rodízio, para detectar avisos perdidos e estornos. Uma venda sem webhook só é reconhecida quando o item Content Post e seu preço correspondem exatamente a uma oferta conhecida, cheia ou com o cupom; valores diferentes precisam de conferência. Eventos assinados já recebidos continuam na fila mesmo após esses 30 dias. As consultas usam as chaves de Produção; testes isolados usam `NASTEN_SANDBOX=sim`.

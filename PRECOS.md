@@ -58,7 +58,11 @@ A conta supõe que a Kiwify calcula a comissão sobre o preço cheio. Se ela cal
 
 Teste grátis: 7 dias, 3 posts e 2 buscas de ideias.
 
-## Produtos na Kiwify
+## Migração para Nasten (20/10/2026)
+
+Novas compras usam a Nasten, mantendo os preços e cupons deste documento. As contas de margem acima usam a taxa histórica da Kiwify; não representam a taxa da Nasten. O painel financeiro usa o líquido efetivo retornado pela API Nasten. Veja [NASTEN.md](NASTEN.md) para configurar credenciais, webhook e ofertas.
+
+## Produtos antigos na Kiwify
 
 Crie 9 ofertas de assinatura (3 planos × mensal, semestral, anual) com os valores acima. Os nomes precisam conter o plano
 (Essencial, Profissional ou Agência) e o ciclo (Mensal, Semestral ou Anual), ou preencha `KIWIFY_PRODUTOS`.
