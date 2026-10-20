@@ -1,5 +1,6 @@
 // Chamadas às APIs externas, sempre com a chave da organização (decifrada só na hora do uso).
 import { db } from "../db.js";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { decifrar } from "../cripto.js";
 import { config } from "../config.js";
 import { situacao, cobrancaLigada } from "../planos.js";
@@ -11,7 +12,7 @@ export async function chaveDe(org, provedor) {
   const r = (await db().query("select valor_cifrado from integracoes where org_id = $1 and provedor = $2", [org, provedor])).rows[0];
   if (!r) {
     // Planos pagos incluem a IA: sem chave própria, usa a da plataforma (PLATAFORMA_ANTHROPIC, _MAGNIFIC, _APIFY).
-    // O Zernio nunca por aqui: a chave da plataforma só é usada por zernioDe, sempre presa ao profile da organização.
+    // O Zernio nunca por aqui: zernioDe e contasZernio limitam a publicação às contas da organização.
     const daPlataforma = provedor === "zernio" ? null : process.env["PLATAFORMA_" + provedor.toUpperCase()];
     if (daPlataforma && cobrancaLigada()) { const s = await situacao(org); if (s.ativo) return daPlataforma; }
   }
@@ -158,38 +159,51 @@ const NOMES_REDE = { instagram: "Instagram", facebook: "Facebook", tiktok: "TikT
 export const REDES_CONECTAVEIS = { Instagram: "instagram", Facebook: "facebook", TikTok: "tiktok", X: "twitter", Threads: "threads" };
 
 // Com que conta do Zernio a organização publica:
-// - chave própria cadastrada em Integrações: a conta Zernio do cliente, com todas as contas dela;
-// - senão, a conta da plataforma (PLATAFORMA_ZERNIO), só para planos ativos e só com as contas do profile da organização.
-// A chave da plataforma nunca sai daqui sem o profile; sem profile, nada é listado nem publicado.
+// - chave própria cadastrada em Integrações: só as contas vinculadas explicitamente à organização;
+// - senão, a conta da plataforma (PLATAFORMA_ZERNIO), só para planos ativos e contas da organização.
+// Contas antigas em um Zernio compartilhado também podem ser vinculadas pela administração.
 export async function zernioDe(org) {
   const propria = (await db().query("select 1 from integracoes where org_id = $1 and provedor = 'zernio'", [org])).rows.length > 0;
-  if (propria) return { modo: "propria", chave: await chaveDe(org, "zernio"), perfil: null };
+  if (propria) return { org, modo: "propria", chave: await chaveDe(org, "zernio"), perfil: null };
   const daPlataforma = process.env.PLATAFORMA_ZERNIO;
   if (!daPlataforma || !cobrancaLigada()) throw new ErroIntegracao("A chave do Zernio não está cadastrada. Cadastre em Integrações.");
   if (!(await situacao(org)).ativo) throw new ErroIntegracao("Seu plano não está ativo. Renove para publicar nas redes conectadas.");
   const perfil = (await db().query("select zernio_profile from organizacoes where id = $1", [org])).rows[0]?.zernio_profile || null;
-  return { modo: "plataforma", chave: daPlataforma, perfil };
+  return { org, modo: "plataforma", chave: daPlataforma, perfil };
 }
 const cabecalho = z => ({ authorization: `Bearer ${z.chave}` });
 const motivoZernio = r => String((r.json && (r.json.error || r.json.message)) || r.txt || r.status).slice(0, 300);
 const perfilDaConta = c => String((c.profileId && c.profileId._id) || c.profileId || "");
-// Contas que a organização pode usar. No modo plataforma, só as do profile dela: filtradas no pedido e conferidas aqui de novo.
+const hashCredencial = chave => createHash("sha256").update(chave).digest("hex");
+async function escopoContas(z, banco = db()) {
+  const vinculos = (await banco.query("select conta_id, org_id, credencial_hash from zernio_contas")).rows;
+  const perfis = (await banco.query("select id, zernio_profile from organizacoes where zernio_profile is not null")).rows;
+  const hash = hashCredencial(z.chave);
+  const ids = vinculos.filter(v => v.org_id === z.org && v.credencial_hash === hash).map(v => v.conta_id).sort();
+  const donos = new Map(vinculos.map(v => [v.conta_id, v.org_id]));
+  const donosPerfis = new Map(perfis.map(p => [p.zernio_profile, p.id]));
+  const disponivel = c => (!donos.has(c._id) || donos.get(c._id) === z.org) && (!donosPerfis.has(perfilDaConta(c)) || donosPerfis.get(perfilDaConta(c)) === z.org);
+  return { ids, disponivel, permite: c => disponivel(c) && ((z.perfil && perfilDaConta(c) === z.perfil) || ids.includes(c._id)) };
+}
+// A filtragem local vale para listagem, publicação e desconexão, inclusive ao usar o cache.
 // A lista fica guardada por 2 minutos: o painel pergunta a cada abertura e o Zernio às vezes demora (já levou 2 min e caiu).
 // fresco: publicar, desconectar e a tela de Integrações perguntam de novo, mas usam a última lista boa se o Zernio não responder.
 const CONTAS = new Map(), CONTAS_MS = 2 * 60000;
 async function contasZernio(z, { fresco = false } = {}) {
-  if (z.modo === "plataforma" && !z.perfil) return { ok: true, status: 200, contas: [] };
-  const k = z.chave + "|" + (z.perfil || ""), guardada = CONTAS.get(k);
-  if (!fresco && guardada && Date.now() - guardada.t < CONTAS_MS) return guardada.r;
+  const escopo = await escopoContas(z);
+  if (!z.perfil && !escopo.ids.length) return { ok: true, status: 200, contas: [] };
+  const k = JSON.stringify([z.org, hashCredencial(z.chave), z.perfil, escopo.ids]), guardada = CONTAS.get(k);
+  const filtrar = async res => ({ ...res, contas: res.contas.filter((await escopoContas(z)).permite) });
+  if (!fresco && guardada && Date.now() - guardada.t < CONTAS_MS) return filtrar(guardada.r);
   let r;
-  try { r = await pedir(`${ZERNIO}/accounts${z.perfil ? "?profileId=" + encodeURIComponent(z.perfil) : ""}`, { headers: cabecalho(z) }, 15000); }
+  try { r = await pedir(`${ZERNIO}/accounts${z.perfil && !escopo.ids.length ? "?profileId=" + encodeURIComponent(z.perfil) : ""}`, { headers: cabecalho(z) }, 15000); }
   catch (e) {
     console.error("[zernio] contas:", e.name === "AbortError" ? "sem resposta em 15 s" : e.message);
-    return guardada ? guardada.r : { ok: false, status: 0, contas: [] };
+    return guardada ? filtrar(guardada.r) : { ok: false, status: 0, contas: [] };
   }
-  if (!r.ok) return r.status >= 500 && guardada ? guardada.r : { ok: false, status: r.status, contas: [] };
+  if (!r.ok) return r.status >= 500 && guardada ? filtrar(guardada.r) : { ok: false, status: r.status, contas: [] };
   const todas = (r.json && r.json.accounts) || [];
-  const res = { ok: true, status: r.status, contas: z.perfil ? todas.filter(c => perfilDaConta(c) === z.perfil) : todas };
+  const res = await filtrar({ ok: true, status: r.status, contas: todas });
   CONTAS.set(k, { t: Date.now(), r: res });
   return res;
 }
@@ -204,11 +218,51 @@ export async function contasConectadas(org) {
   let z; try { z = await zernioDe(org); } catch (e) { return { modo: null, contas: [], aviso: e.message }; }
   const r = await contasZernio(z, { fresco: true });
   if (!r.ok) return { modo: z.modo, contas: [], aviso: z.modo === "propria" ? "O Zernio recusou a chave. Confira em Integrações." : "Não consegui falar com o Zernio agora." };
-  const contas = r.contas.filter(c => NOMES_REDE[c.platform]).map(c => ({
-    id: c._id, rede: NOMES_REDE[c.platform], usuario: c.username || "", nome: c.displayName || "",
-    ativa: c.isActive !== false, reconectar: !!c.needsReconnection,
-  }));
+  const contas = r.contas.filter(c => NOMES_REDE[c.platform]).map(descreverConta);
   return { modo: z.modo, contas };
+}
+const descreverConta = c => ({
+  id: c._id, rede: NOMES_REDE[c.platform], usuario: c.username || "", nome: c.displayName || "",
+  ativa: c.isActive !== false, reconectar: !!c.needsReconnection,
+});
+// Só a administração da plataforma ou quem comprova ter a chave própria pode escolher
+// contas do Zernio compartilhado. A chave nunca é devolvida ao navegador.
+async function credencialParaVincular(org, { admin = false, chave = "" } = {}) {
+  const z = await zernioDe(org);
+  if (!admin && (z.modo !== "propria" || !timingSafeEqual(Buffer.from(hashCredencial(String(chave))), Buffer.from(hashCredencial(z.chave))))) {
+    throw new ErroIntegracao("Informe a chave do Zernio desta organização para selecionar as redes.");
+  }
+  return z;
+}
+async function buscarTodasContas(z) {
+  const r = await pedir(`${ZERNIO}/accounts`, { headers: cabecalho(z) }, 15000);
+  if (!r.ok || !Array.isArray(r.json?.accounts)) throw new ErroIntegracao("Não consegui consultar as contas do Zernio. Confira a chave ou tente novamente.");
+  return r.json.accounts;
+}
+export async function contasParaVincular(org, acesso) {
+  const z = await credencialParaVincular(org, acesso), todas = await buscarTodasContas(z), escopo = await escopoContas(z);
+  return todas.filter(c => NOMES_REDE[c.platform] && escopo.disponivel(c)).map(c => ({
+    ...descreverConta(c), selecionada: !!escopo.permite(c), fixa: !!(z.perfil && perfilDaConta(c) === z.perfil),
+  }));
+}
+export async function vincularContas(org, ids, acesso) {
+  if (!Array.isArray(ids) || ids.length > 200 || ids.some(id => typeof id !== "string" || !id || id.length > 100)) throw new ErroIntegracao("Seleção de contas inválida.");
+  const z = await credencialParaVincular(org, acesso), todas = await buscarTodasContas(z);
+  try {
+    await db().transacao(async tx => {
+      const escopo = await escopoContas(z, tx);
+      const escolhidas = [...new Set(ids)].map(id => todas.find(c => c._id === id && NOMES_REDE[c.platform] && escopo.disponivel(c)));
+      if (escolhidas.some(c => !c)) throw new ErroIntegracao("Uma das contas não está disponível para esta organização. Atualize a seleção.");
+      await tx.query("delete from zernio_contas where org_id = $1", [org]);
+      for (const c of escolhidas) {
+        if (z.perfil && perfilDaConta(c) === z.perfil) continue;
+        await tx.query("insert into zernio_contas (conta_id, org_id, credencial_hash) values ($1, $2, $3)", [c._id, org, hashCredencial(z.chave)]);
+      }
+    });
+  } catch (e) {
+    if (e.code === "23505") throw new ErroIntegracao("Uma das contas já foi vinculada a outra organização. Atualize a seleção.");
+    throw e;
+  }
 }
 // Cria o profile da organização na conta da plataforma (externalId = id da organização) e guarda o id.
 async function criarPerfil(org, z) {

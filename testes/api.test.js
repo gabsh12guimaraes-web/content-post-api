@@ -230,6 +230,8 @@ test("buscar ideias guarda o pedido; mudar data e publicar agora", async () => {
   await db().query("delete from tarefas where tipo = 'ideias'");
 
   await chamar({ acao: "salvarIntegracao", provedor: "zernio", valor: "sk_zernio_teste_1234" }, ana);
+  // As publicações simuladas usam somente contas explicitamente atribuídas à organização.
+  for (const conta of ["acc1", "ig", "fb"]) await db().query("insert into zernio_contas (conta_id, org_id, credencial_hash) values ($1, $2, $3)", [conta, anaOrg, crypto.createHash("sha256").update("sk_zernio_teste_1234").digest("hex")]);
   const i = (await db().query("insert into ideias (org_id, titulo, formato, rede, score) values ($1, 'Para publicar', 'Estatico', 'Instagram', 7) returning id", [anaOrg])).rows[0].id;
   const { id } = await chamar({ acao: "agendarIdeia", id: i, data: new Date(Date.now() + 5 * 86400000).toISOString() }, ana);
   const nova = new Date(Date.now() + 9 * 86400000).toISOString();
@@ -531,9 +533,14 @@ test("redes conectadas: um profile do Zernio por organização e cada uma public
     assert.equal((await chamar({ acao: "conectarRede", rede: "X" }, gil)).status, 400);
     await assert.rejects(() => publicarZernio(orgG, { rede: "twitter", midias, legenda: "oi", chave: "t2" }), /plano não está ativo/);
 
-    // Com chave própria, a organização usa a conta Zernio dela, sem profile da plataforma.
+    // Chave própria não libera todas as contas: exige seleção explícita.
     await chamar({ acao: "salvarIntegracao", provedor: "zernio", valor: "sk_zernio_do_fabio" }, fabio);
-    assert.equal((await chamar({ acao: "contasRedes" }, fabio)).modo, "propria");
+    const propria = await chamar({ acao: "contasRedes" }, fabio);
+    assert.equal(propria.modo, "propria");
+    assert.deepEqual(propria.contas, []);
+    assert.equal(propria.precisaChave, true);
+    assert.equal((await chamar({ acao: "vincularContas", contas: ["ig-dono"], chave: "sk_zernio_do_fabio" }, fabio)).status, 200);
+    assert.deepEqual((await chamar({ acao: "contasRedes" }, fabio)).contas.map(c => c.id), ["ig-dono"]);
     assert.equal(pedidos.at(-1).chave, "Bearer sk_zernio_do_fabio");
     assert.equal(pedidos.at(-1).busca.get("profileId"), null);
     assert.equal((await chamar({ acao: "conectarRede", rede: "Instagram" }, fabio)).status, 400);

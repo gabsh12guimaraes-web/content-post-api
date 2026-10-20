@@ -26,6 +26,12 @@ O painel (repositório `content-post`) fala com esta API por `POST /api`.
 
 As tabelas são criadas sozinhas na primeira vez que a API sobe (pasta `migracoes/`).
 
+## Redes por organização no Zernio
+
+Conexões feitas pelo painel usam o profile exclusivo da organização. Para contas já existentes em um Zernio compartilhado, abra **Integrações › Selecionar redes desta organização** e marque apenas as contas daquela marca. Uma conta só pode estar vinculada a uma organização. O vínculo vale tanto para exibição quanto para publicação.
+
+A administração da plataforma (`ADMIN_EMAILS`) pode distribuir as contas do Zernio principal. Clientes com Zernio próprio continuam podendo cadastrar sua chave; para selecionar contas, donos e administradores precisam informar essa chave novamente. A lista completa nunca é exibida aos demais membros. Chaves próprias antigas precisam dessa seleção antes de voltar a publicar; a migração não tenta adivinhar a qual marca cada conta pertence.
+
 ## Trazer os dados do Airtable
 
 Depois de criar sua conta no painel, vá em **Integrações › Trazer do Airtable**, cole um token do Airtable com leitura da base e o ID da base. A API importa marca (com logos e mood board), fontes, ideias e calendário (com fotos, clipes e artes). O token é usado só nessa importação e não fica salvo.

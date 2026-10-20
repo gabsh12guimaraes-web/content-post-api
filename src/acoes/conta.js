@@ -5,7 +5,7 @@ import { config } from "../config.js";
 import { hashSenha, conferirSenha, novoToken, hashToken, cifrar } from "../cripto.js";
 import { falha, exigirId, texto } from "../erros.js";
 import { testarProvedor } from "../provedores/testar.js";
-import { contasConectadas, linkConexao, desconectarConta, REDES_CONECTAVEIS } from "../provedores/index.js";
+import { contasConectadas, contasParaVincular, vincularContas, linkConexao, desconectarConta, REDES_CONECTAVEIS } from "../provedores/index.js";
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PESO = { editor: 1, admin: 2, dono: 3 };
@@ -256,7 +256,20 @@ export const acoesOrg = {
 
   // Redes conectadas pelo painel: cada organização tem um profile próprio na conta Zernio da plataforma.
   async contasRedes(ctx) {
-    return { ...(await contasConectadas(ctx.org)), redes: Object.keys(REDES_CONECTAVEIS), podeGerir: podeGerir(ctx.papel) };
+    const r = await contasConectadas(ctx.org), admin = ehAdmin(ctx.usuario.email);
+    return { ...r, redes: Object.keys(REDES_CONECTAVEIS), podeGerir: podeGerir(ctx.papel),
+      podeVincular: podeGerir(ctx.papel) && !!r.modo && (r.modo === "propria" || admin), precisaChave: r.modo === "propria" && !admin };
+  },
+
+  async contasParaVincular(ctx, b) {
+    if (!podeGerir(ctx.papel)) falha("Só donos e administradores podem selecionar redes.", 403);
+    return { contas: await contasParaVincular(ctx.org, { admin: ehAdmin(ctx.usuario.email), chave: b.chave }) };
+  },
+
+  async vincularContas(ctx, b) {
+    if (!podeGerir(ctx.papel)) falha("Só donos e administradores podem selecionar redes.", 403);
+    await vincularContas(ctx.org, b.contas, { admin: ehAdmin(ctx.usuario.email), chave: b.chave });
+    return {};
   },
 
   async conectarRede(ctx, b) {
