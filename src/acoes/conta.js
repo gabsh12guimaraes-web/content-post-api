@@ -6,6 +6,7 @@ import { hashSenha, conferirSenha, novoToken, hashToken, cifrar } from "../cript
 import { falha, exigirId, texto } from "../erros.js";
 import { testarProvedor } from "../provedores/testar.js";
 import { contasConectadas, contasParaVincular, vincularContas, linkConexao, desconectarConta, REDES_CONECTAVEIS } from "../provedores/index.js";
+import { situacaoAcervoMagnific } from "../acervo-magnific.js";
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PESO = { editor: 1, admin: 2, dono: 3 };
@@ -232,6 +233,7 @@ export const acoesOrg = {
     const salvas = new Map((await db().query("select provedor, dica, atualizado_em from integracoes where org_id = $1", [ctx.org])).rows.map(r => [r.provedor, r]));
     return {
       podeGerir: podeGerir(ctx.papel),
+      acervoMagnific: await situacaoAcervoMagnific(ctx),
       integracoes: Object.entries(PROVEDORES).map(([id, p]) => ({ id, ...p, configurada: salvas.has(id), dica: salvas.get(id)?.dica || "", atualizadoEm: salvas.get(id)?.atualizado_em || null })),
     };
   },

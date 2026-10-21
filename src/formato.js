@@ -37,7 +37,7 @@ export async function postsParaPainel(org, posts) {
     return {
       id: p.id, Titulo: p.titulo, DataPublicacao: p.data_publicacao, Rede: p.rede, Formato: p.formato, Pilar: p.pilar, Origem: p.origem || "ia",
       Status: p.status, Versao: p.versao, Legenda: p.legenda, Hashtags: p.hashtags, Slides: JSON.stringify(p.slides || []),
-      LinkPublicado: p.link_publicado, Erro: p.erro, Redes: (p.redes && p.redes.length ? p.redes : [p.rede]).filter(Boolean), Links: p.links || {}, Publicacao: p.publicacao || {},
+      LinkPublicado: p.link_publicado, Erro: p.erro, AvisoMidias: p.conteudo?.aviso_midias || "", Redes: (p.redes && p.redes.length ? p.redes : [p.rede]).filter(Boolean), Links: p.links || {}, Publicacao: p.publicacao || {},
       Fotos: fotos, ImagensSlides: JSON.stringify(Object.fromEntries(nf.map(n => [n, (a.get(p.fotos[n]) || {}).url || ""]))),
       Clipes: clipes, ClipesSlides: JSON.stringify(Object.fromEntries(nc.map(n => [n, (a.get(p.clipes[n]) || {}).url || ""]))),
       Arquivos: (p.artes || []).map(id => a.get(id)).filter(Boolean), ArtesProntas: p.artes_prontas,

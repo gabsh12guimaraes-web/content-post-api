@@ -10,6 +10,7 @@ import { legendarEnviado } from "./entrada.js";
 import "./exemplos.js";
 import { contextoMegaBrain } from "../mega-brain.js";
 import { prepararComposicoes } from "../blocos-texto.js";
+import { criarBuscaAcervo } from "../acervo-magnific.js";
 
 // Story em imagem estática segue o caminho das fotos (1 imagem vertical); os outros stories e os Reels são vídeo.
 // Story em imagem: uma só ("imagem") ou uma sequência de várias telas ("sequencia"); os dois seguem o caminho das fotos.
@@ -255,6 +256,22 @@ async function gerarMidias(org, post, c, regerar) {
       clipes[p.n] = id;
     } catch (e) { falhou("clipe", e); }
   }
+  if (semCredito) {
+    const buscar = await criarBuscaAcervo(org);
+    if (buscar) {
+      const alvos = video ? (c.cenas || []).map((x, i) => ({ ...x, n: Number(x.n) || i + 1 })) : (c.prompts_imagem || []).map(x => ({ ...x, n: Number(x.slide) }));
+      let usadas = 0;
+      for (const x of alvos) {
+        if (!x.n || fotos[x.n] || clipes[x.n] || (x.pessoa && rosto) || (x.produto && produto)) continue;
+        try {
+          const id = await buscar({ texto: x.prompt_imagem || x.prompt || x.visual || post.titulo, vertical: video || x.proporcao === "9:16", post: post.id });
+          if (id) { fotos[x.n] = id; usadas++; }
+        } catch (e) { console.error("[acervo]", e.message); }
+      }
+      falhas = alvos.filter(x => x.n && !fotos[x.n] && !clipes[x.n]).length;
+      if (usadas) c.aviso_midias = `A geração ficou sem créditos. Usamos ${usadas} foto(s) do acervo Magnific, sem créditos de geração.${video ? " No vídeo, essas fotos entram como cenas estáticas." : ""} Revise as imagens antes de aprovar.`;
+    }
+  }
   return { fotos, clipes, velhos, falhas, semCredito };
 }
 const avisoFalhas = (n, semCredito) => (!n ? null : semCredito
@@ -345,8 +362,8 @@ registrar("criar", Object.assign(async (org, { post: id }) => {
   // Começa do zero: apaga mídias de uma criação anterior.
   await apagarArquivos(org, [...Object.values(post.fotos || {}), ...Object.values(post.clipes || {}), ...(post.artes || [])]);
   const r = await gerarMidias(org, { ...post, fotos: doBanco.fotos, clipes: doBanco.clipes }, c, null);
-  await db().query("update posts set fotos = $2, clipes = $3, artes = '{}', artes_prontas = false, regerar = '{}', status = 'EmRevisao', erro = $4, atualizado_em = now() where id = $1",
-    [post.id, JSON.stringify(r.fotos), JSON.stringify(r.clipes), avisoFalhas(r.falhas, r.semCredito)]);
+  await db().query("update posts set fotos = $2, clipes = $3, artes = '{}', artes_prontas = false, regerar = '{}', status = 'EmRevisao', erro = $4, conteudo = $5, atualizado_em = now() where id = $1",
+    [post.id, JSON.stringify(r.fotos), JSON.stringify(r.clipes), avisoFalhas(r.falhas, r.semCredito), JSON.stringify(c)]);
   return { fotos: Object.keys(r.fotos).length, clipes: Object.keys(r.clipes).length, falhas: r.falhas };
 }, {
   aoFalhar: async (org, { post }, e) => {

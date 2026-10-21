@@ -74,6 +74,14 @@ Usam Postgres embutido (PGlite) e simulam as APIs externas. Nada é cobrado.
 
 Nenhuma chave, senha ou token fica neste repositório. Senhas das pessoas: hash scrypt. Sessões e convites: só o hash SHA-256 do token. Chaves das integrações: cifradas com a `CHAVE_MESTRA`, que existe só nas variáveis do Railway.
 
+## Acervo Magnific quando faltar crédito
+
+A migração `030_acervo_magnific.sql` habilita uma preferência por chave e registra a procedência das fotos do acervo. Em Integrações → Magnific, quem administra a conta informa Premium, Premium+ ou Pro e salva a preferência. Fica desligada por padrão; uma chave nova precisa de nova configuração. Apenas o administrador da plataforma configura a chave compartilhada da plataforma.
+
+Depois de uma resposta de saldo insuficiente na geração, a criação ou ajuste pode buscar fotos prontas em `GET https://api.magnific.com/v1/resources`, obter o download licenciado e salvar o original no banco daquela organização. Arquivos já baixados são reutilizados. A [documentação de preços](https://docs.magnific.com/pricing) prevê até 100 downloads por dia sem créditos nesses planos; o limite é compartilhado pela conta e o retorno 429 interrompe a busca. Business e Enterprise não são habilitados porque podem cobrar por download. Não há novas variáveis de ambiente nem geração adicional de IA nesse fallback.
+
+Fotos de acervo ficam identificadas como `origem=acervo`, com recurso, autor, referência de licença e data. Não substituem pessoas ou produtos de referência por fotos genéricas. Em Reels, entram como cenas estáticas; a pessoa revisa, monta o vídeo final e confirma a aprovação. Falta de permissão, limite diário ou ausência de resultados mantém o aviso para escolher uma mídia do banco. Os testes usam respostas simuladas; nenhuma chave real é usada.
+
 ## Pagamentos pela Nasten
 
 Veja o passo a passo em [NASTEN.md](NASTEN.md). As novas compras usam os nove checkouts Nasten com preços finais sem cupom e os convites de afiliados. A migração está liberada: a variável temporária `PAGAMENTOS_PROVEDOR` não controla mais o catálogo. `KIWIFY_CHECKOUT` e `KIWIFY_AFILIADOS` antigos deixam de definir os links do painel. Os planos já pagos não são removidos e `/kiwify` permanece para os avisos das compras anteriores; esses avisos não alteram uma organização que já comprou na Nasten.

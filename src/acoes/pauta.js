@@ -271,7 +271,7 @@ export const acoesPauta = {
     const { rows } = await db().query("select * from banco_imagens where org_id = $1 order by criado_em desc", [ctx.org]);
     const a = await anexos(ctx.org, rows.map(r => r.arquivo_id));
     const tarefas = (await db().query("select payload->>'imagem' as id from tarefas where org_id = $1 and tipo = 'descreverImagem' and status in ('pendente', 'rodando')", [ctx.org])).rows.map(r => r.id);
-    return { podeVitrine: ehAdmin(ctx.usuario.email) && podeGerir(ctx.papel), imagens: rows.map(r => ({ id: r.id, nome: r.nome, descricao: r.descricao, tags: r.tags || [], origem: r.origem || "envio", publicoLogin: r.publico_login, post: r.post_id || null, arquivo: a.get(r.arquivo_id) || null, descrevendo: tarefas.includes(r.id) })).filter(x => x.arquivo) };
+    return { podeVitrine: ehAdmin(ctx.usuario.email) && podeGerir(ctx.papel), imagens: rows.map(r => ({ id: r.id, nome: r.nome, descricao: r.descricao, tags: r.tags || [], origem: r.origem || "envio", fonte: r.fonte || null, publicoLogin: r.publico_login, post: r.post_id || null, arquivo: a.get(r.arquivo_id) || null, descrevendo: tarefas.includes(r.id) })).filter(x => x.arquivo) };
   },
   async publicarMidiaLogin(ctx, b) {
     if (!ehAdmin(ctx.usuario.email) || !podeGerir(ctx.papel)) falha("Só a administração da plataforma pode selecionar mídias para o login.", 403);
