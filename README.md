@@ -9,6 +9,8 @@ API da **Pauta de Conteúdo**. Várias organizações usam a mesma plataforma, c
 
 O painel (repositório `content-post`) fala com esta API por `POST /api`.
 
+Confirmação de e-mail e recuperação de senha usam links de uso único e entrega transacional pelo Loops. Os modelos com design, as variáveis de ambiente e o passo a passo de ativação estão em [emails/loops/README.md](emails/loops/README.md). A confirmação é ativada para novos cadastros por `AUTH_EMAIL_ATIVO=sim`, após configurar os modelos. Contas anteriores mantêm acesso. A origem nativa do iOS (`capacitor://localhost`) é aceita além das origens web configuradas.
+
 O **Mega Brain** usa `listarMegaBrain` e `gerarEstrategiaMegaBrain` para salvar estratégias por organização. As perguntas guiadas são locais; a síntese usa Claude na fila `estrategia` e está incluída no plano. `buscarIdeias` aceita `estrategia`, `etapa` (`topo`, `meio` ou `fundo`) e um UUID `pedido` para gerar ideias contextualizadas, descontando uma busca. O pedido é idempotente; falhas da geração devolvem a busca. A migração `028_mega_brain.sql` cria o histórico e os vínculos das ideias.
 
 `enviarFonteMarca` recebe `base64` e `nome` opcional, valida TTF/OTF/WOFF/WOFF2 com FontKit (até 5 MB) e guarda a fonte no volume com vínculo à organização. `listar` devolve `tipografias`; a diagramação usa `fonte: "marca-<uuid>"`, validada também nas opções por slide e em modelos salvos. A migração `029_fontes_marca.sql` cria esse cadastro; não há nova variável de ambiente.

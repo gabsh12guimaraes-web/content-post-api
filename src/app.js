@@ -19,8 +19,9 @@ import { painelAdmin } from "./admin.js";
 import { catalogo, situacao, assinaturaKiwifyOk, avisoKiwify } from "./planos.js";
 import { midiasLogin, arquivoLogin } from "./vitrine.js";
 import { assinaturaNastenOk, receberAvisoNasten } from "./nasten.js";
+import { acoesEmail, confirmacaoPendente } from "./autenticacao-email.js";
 
-const PUBLICAS = new Set(["cadastrar", "entrar", "verConvite", "planos", "vitrineLogin"]);
+const PUBLICAS = new Set(["cadastrar", "entrar", "verConvite", "planos", "vitrineLogin", ...Object.keys(acoesEmail)]);
 const SEM_ORG = new Set(["eu", "sair", "trocarSenha", "aceitarConvite", "criarOrganizacao", "trocarOrganizacao", "painelAdmin"]);
 const acoesPlano = {
   async vitrineLogin() { return { midias: await midiasLogin() }; },
@@ -35,7 +36,7 @@ const acoesPlano = {
     return { situacao: s, ...c };
   },
 };
-const TODAS = { ...acoesConta, ...acoesOrg, ...acoesPauta, ...acoesPlano, ...acoesMegaBrain, ...acoesTipografia, ...acoesAcervoMagnific };
+const TODAS = { ...acoesConta, ...acoesOrg, ...acoesPauta, ...acoesPlano, ...acoesMegaBrain, ...acoesTipografia, ...acoesAcervoMagnific, ...acoesEmail };
 
 // Limite simples por IP para login e cadastro (evita tentativa de senha em massa).
 const tentativas = new Map();
@@ -51,13 +52,13 @@ async function contexto(req) {
   const bruto = String(req.headers["x-pauta-token"] || (req.headers.authorization || "").replace(/^Bearer\s+/i, ""));
   if (!/^[a-f0-9]{64}$/.test(bruto)) return null;
   const s = (await db().query(
-    `select s.id, s.org_atual, u.id as usuario_id, u.email, u.nome from sessoes s join usuarios u on u.id = s.usuario_id
+    `select s.id, s.org_atual, u.id as usuario_id, u.email, u.nome, u.email_confirmado_em, u.exigir_confirmacao_email from sessoes s join usuarios u on u.id = s.usuario_id
      where s.token_hash = $1 and s.expira_em > now()`, [hashToken(bruto)])).rows[0];
   if (!s) return null;
   const membros = (await db().query("select org_id, papel from membros where usuario_id = $1", [s.usuario_id])).rows;
   const m = membros.find(x => x.org_id === s.org_atual) || membros[0] || null;
   if (m && m.org_id !== s.org_atual) await db().query("update sessoes set org_atual = $2 where id = $1", [s.id, m.org_id]);
-  return { sessao: s.id, usuario: { id: s.usuario_id, email: s.email, nome: s.nome }, org: m ? m.org_id : null, papel: m ? m.papel : null };
+  return { sessao: s.id, usuario: { id: s.usuario_id, email: s.email, nome: s.nome, confirmacaoPendente: confirmacaoPendente(s) }, org: m ? m.org_id : null, papel: m ? m.papel : null };
 }
 
 export async function criarApp() {
@@ -142,6 +143,7 @@ export async function criarApp() {
       else {
         ctx = await contexto(req);
         if (!ctx) throw new ErroApi("Sua sessão expirou. Entre de novo.", 401, { login: true });
+        if (ctx.usuario.confirmacaoPendente && !["eu", "sair", "trocarSenha"].includes(acao)) throw new ErroApi("Confirme seu e-mail para continuar.", 403, { confirmarEmail: true });
         if (!SEM_ORG.has(acao) && !ctx.org) throw new ErroApi("Crie uma organização ou aceite um convite para começar.", 409, { semOrganizacao: true });
       }
       const t0 = Date.now(), r = await fn(ctx, b), ms = Date.now() - t0;

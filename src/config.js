@@ -16,7 +16,7 @@ export const config = {
   // Endereço público desta API (para montar os links dos arquivos usados na publicação).
   urlPublica: (env.URL_PUBLICA || env.RAILWAY_PUBLIC_DOMAIN && `https://${env.RAILWAY_PUBLIC_DOMAIN}` || `http://localhost:${Number(env.PORT) || 3000}`).replace(/\/$/, ""),
   // Sites que podem chamar a API pelo navegador, separados por vírgula.
-  origens: (env.ORIGENS || "https://gabsh12guimaraes-web.github.io,http://localhost:4789").split(",").map(s => s.trim()).filter(Boolean),
+  origens: [...new Set([...(env.ORIGENS || "https://gabsh12guimaraes-web.github.io,http://localhost:4789").split(",").map(s => s.trim()).filter(Boolean), "capacitor://localhost"])],
   // Pasta dos arquivos enviados e gerados (no Railway: um Volume montado aqui).
   pastaArquivos: env.PASTA_ARQUIVOS || "./arquivos-locais",
   // Liga a fila de tarefas e a publicação agendada neste processo.

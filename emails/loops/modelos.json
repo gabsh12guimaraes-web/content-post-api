@@ -1,0 +1,56 @@
+[
+  {
+    "id": "confirmacao",
+    "nome": "Confirmação de e-mail",
+    "assunto": "Confirme seu e-mail | Easy Content Post",
+    "previa": "Só falta confirmar seu endereço para começar a criar.",
+    "selo": "SEU PRÓXIMO PASSO",
+    "titulo": "Boas ideias começam<br/>com uma conexão.",
+    "intro": "Olá, {DATA_VARIABLE:nome}. Que bom ter você por aqui! Confirme seu e-mail para começar a transformar suas ideias em conteúdo.",
+    "botao": "Confirmar meu e-mail",
+    "nota": "Este link vale por <strong>{DATA_VARIABLE:validade}</strong> e pode ser usado uma única vez.",
+    "cuidado": "Se você não criou uma conta no Easy Content Post, pode ignorar esta mensagem.",
+    "variaveis": [
+      "nome",
+      "link",
+      "validade"
+    ],
+    "env": "LOOPS_CONFIRMACAO_ID"
+  },
+  {
+    "id": "recuperacao",
+    "nome": "Recuperação de senha",
+    "assunto": "Redefina sua senha | Easy Content Post",
+    "previa": "Um link seguro para você voltar às suas boas ideias.",
+    "selo": "VAMOS RECUPERAR SEU ACESSO",
+    "titulo": "Sua próxima ideia<br/>está esperando você.",
+    "intro": "Olá, {DATA_VARIABLE:nome}. Recebemos uma solicitação para redefinir sua senha. Escolha uma nova senha pelo botão abaixo.",
+    "botao": "Escolher nova senha",
+    "nota": "Por segurança, este link expira em <strong>{DATA_VARIABLE:validade}</strong> e só pode ser usado uma vez.",
+    "cuidado": "Não foi você? Ignore este e-mail. Sua senha permanece a mesma até que uma nova seja salva.",
+    "variaveis": [
+      "nome",
+      "link",
+      "validade"
+    ],
+    "env": "LOOPS_RECUPERACAO_ID"
+  },
+  {
+    "id": "senha-alterada",
+    "nome": "Aviso de senha alterada",
+    "assunto": "Sua senha foi alterada | Easy Content Post",
+    "previa": "Confira a atualização de segurança da sua conta.",
+    "selo": "SEGURANÇA DA SUA CONTA",
+    "titulo": "Senha atualizada.<br/>Criatividade em dia.",
+    "intro": "Olá, {DATA_VARIABLE:nome}. A senha da sua conta no Easy Content Post foi alterada em <strong>{DATA_VARIABLE:data}</strong> (horário de Brasília).",
+    "botao": "Acessar minha conta",
+    "nota": "Se foi você, está tudo certo. Use sua nova senha no próximo acesso.",
+    "cuidado": "Não reconhece esta alteração? Acesse o login e use “Esqueceu sua senha?” para recuperar o acesso. Escolha uma senha que só você conheça.",
+    "variaveis": [
+      "nome",
+      "link",
+      "data"
+    ],
+    "env": "LOOPS_SENHA_ALTERADA_ID"
+  }
+]

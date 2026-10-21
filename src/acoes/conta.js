@@ -7,6 +7,7 @@ import { falha, exigirId, texto } from "../erros.js";
 import { testarProvedor } from "../provedores/testar.js";
 import { contasConectadas, contasParaVincular, vincularContas, linkConexao, desconectarConta, REDES_CONECTAVEIS } from "../provedores/index.js";
 import { situacaoAcervoMagnific } from "../acervo-magnific.js";
+import { confirmacaoObrigatoria, confirmacaoPendente, exigirEmailConfigurado, criarLinkConta, enfileirarEmailConta, agendarEmailsConta } from "../autenticacao-email.js";
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PESO = { editor: 1, admin: 2, dono: 3 };
@@ -38,13 +39,13 @@ async function abrirSessao(usuario, org, lembrar) {
 
 // Quem é a pessoa, de quais organizações participa e em qual está agora.
 export async function descrever(usuarioId, orgAtual) {
-  const u = (await db().query("select id, email, nome from usuarios where id = $1", [usuarioId])).rows[0];
+  const u = (await db().query("select id, email, nome, email_confirmado_em, exigir_confirmacao_email from usuarios where id = $1", [usuarioId])).rows[0];
   const orgs = (await db().query(
     "select o.id, o.nome, m.papel, o.onboarding_em from membros m join organizacoes o on o.id = m.org_id where m.usuario_id = $1 order by o.nome", [usuarioId])).rows
     // onboarding: o primeiro acesso ainda não foi feito; primeirosPassos: terminou há menos de 14 dias (mostra o checklist).
     .map(({ onboarding_em, ...o }) => ({ ...o, onboarding: !onboarding_em, primeirosPassos: !onboarding_em || Date.now() - new Date(onboarding_em) < 14 * 86400000 }));
   const atual = orgs.find(o => o.id === orgAtual) || orgs[0] || null;
-  return { usuario: { id: u.id, email: u.email, nome: u.nome, papel: atual ? atual.papel : null, admin: ehAdmin(u.email) || undefined }, organizacoes: orgs, organizacao: atual };
+  return { usuario: { id: u.id, email: u.email, nome: u.nome, emailConfirmado: !!u.email_confirmado_em, confirmacaoPendente: confirmacaoPendente(u), papel: atual ? atual.papel : null, admin: ehAdmin(u.email) || undefined }, organizacoes: orgs, organizacao: atual };
 }
 
 async function convitePorToken(token) {
@@ -61,6 +62,8 @@ async function entrarNaOrg(tx, convite, usuarioId) {
 
 export const acoesConta = {
   async cadastrar(_ctx, b) {
+    const exigirConfirmacao = confirmacaoObrigatoria();
+    if (exigirConfirmacao) exigirEmailConfigurado('confirmacao');
     const email = emailOk(b.email), senha = senhaOk(b.senha), nome = texto(b.nome, 100);
     if (!nome) falha("Preencha seu nome.");
     const convite = b.convite ? await convitePorToken(b.convite) : null;
@@ -71,7 +74,7 @@ export const acoesConta = {
     if ((await db().query("select 1 from usuarios where email = $1", [email])).rows.length) falha("Já existe uma conta com este e-mail. Entre com ela.");
     const { salt, senha_hash } = await hashSenha(senha);
     const { usuario, org } = await db().transacao(async tx => {
-      const u = (await tx.query("insert into usuarios (email, nome, senha_hash, salt, ultimo_acesso) values ($1, $2, $3, $4, now()) returning id", [email, nome, senha_hash, salt])).rows[0].id;
+      const u = (await tx.query("insert into usuarios (email, nome, senha_hash, salt, ultimo_acesso, exigir_confirmacao_email) values ($1, $2, $3, $4, now(), $5) returning id", [email, nome, senha_hash, salt, exigirConfirmacao])).rows[0].id;
       let o;
       if (convite) { await entrarNaOrg(tx, convite, u); o = convite.org_id; }
       else {
@@ -79,9 +82,11 @@ export const acoesConta = {
         await tx.query("insert into membros (org_id, usuario_id, papel) values ($1, $2, 'dono')", [o, u]);
         await tx.query("insert into marcas (org_id, nome) values ($1, $2)", [o, nomeOrg]);
       }
+      if (exigirConfirmacao) await criarLinkConta(u, 'confirmacao', tx);
       return { usuario: u, org: o };
     }).catch(e => { if (e && e.code === "23505") falha("Já existe uma conta com este e-mail. Entre com ela."); throw e; });
     const s = await abrirSessao(usuario, org, true);
+    if (exigirConfirmacao) agendarEmailsConta();
     return { ...s, ...(await descrever(usuario, org)) };
   },
 
@@ -114,12 +119,17 @@ export const acoesConta = {
   async sair(ctx) { await db().query("delete from sessoes where id = $1", [ctx.sessao]); return {}; },
 
   async trocarSenha(ctx, b) {
-    const u = (await db().query("select salt, senha_hash from usuarios where id = $1", [ctx.usuario.id])).rows[0];
-    if (!(await conferirSenha(String(b.atual || ""), u.salt, u.senha_hash))) falha("A senha atual não confere.");
-    const { salt, senha_hash } = await hashSenha(senhaOk(b.nova));
-    await db().query("update usuarios set salt = $2, senha_hash = $3 where id = $1", [ctx.usuario.id, salt, senha_hash]);
-    // Encerra as outras sessões desta pessoa.
-    await db().query("delete from sessoes where usuario_id = $1 and id <> $2", [ctx.usuario.id, ctx.sessao]);
+    const nova = senhaOk(b.nova);
+    await db().transacao(async tx => {
+      const u = (await tx.query("select id, nome, email, salt, senha_hash from usuarios where id = $1 for update", [ctx.usuario.id])).rows[0];
+      if (!(await conferirSenha(String(b.atual || "").slice(0, 200), u.salt, u.senha_hash))) falha("A senha atual não confere.");
+      const { salt, senha_hash } = await hashSenha(nova);
+      await tx.query("update usuarios set salt = $2, senha_hash = $3 where id = $1", [ctx.usuario.id, salt, senha_hash]);
+      await tx.query("delete from sessoes where usuario_id = $1 and id <> $2", [ctx.usuario.id, ctx.sessao]);
+      await tx.query("update conta_links set usado_em = now() where usuario_id = $1 and tipo = 'recuperacao' and usado_em is null", [ctx.usuario.id]);
+      await enfileirarEmailConta(tx, u, 'senha_alterada');
+    });
+    agendarEmailsConta();
     return {};
   },
 

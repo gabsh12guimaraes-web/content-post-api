@@ -1,0 +1,34 @@
+<mjml lang="pt-BR">
+  <mj-head>
+    <mj-title>Redefina sua senha | Easy Content Post</mj-title>
+    <mj-preview>Um link seguro para você voltar às suas boas ideias.</mj-preview>
+    <mj-attributes>
+      <mj-all font-family="Arial, Helvetica, sans-serif" />
+      <mj-text color="#d4d3df" font-size="16px" line-height="26px" padding="0 28px 20px" />
+      <mj-button background-color="#f8395a" color="#ffffff" font-size="16px" font-weight="700" border-radius="12px" inner-padding="17px 24px" padding="6px 28px 24px" align="left" />
+    </mj-attributes>
+    <mj-style> .link-seguro { overflow-wrap: anywhere; word-break: break-all; } @media only screen and (max-width:480px) { .titulo div { font-size:29px !important; line-height:35px !important; } } </mj-style>
+  </mj-head>
+  <mj-body background-color="#0a0c15" width="600px">
+    <mj-section padding="38px 20px 28px"><mj-column><mj-image src="img/logo.png" alt="Content Post" width="220px" padding="0" /></mj-column></mj-section>
+    <mj-wrapper background-color="#191b25" border="1px solid #30323e" border-radius="20px" padding="0 0 12px">
+      <mj-section padding="0"><mj-column><mj-divider border-color="#f8395a" border-width="4px" padding="0 28px 30px" /></mj-column></mj-section>
+      <mj-section padding="0"><mj-column>
+        <mj-text color="#ff8fa3" font-size="11px" font-weight="700" letter-spacing="2px" padding-bottom="16px">VAMOS RECUPERAR SEU ACESSO</mj-text>
+        <mj-text css-class="titulo" color="#ffffff" font-size="35px" line-height="41px" font-weight="700" padding-bottom="24px">Sua próxima ideia<br/>está esperando você.</mj-text>
+        <mj-text>Olá, {DATA_VARIABLE:nome}. Recebemos uma solicitação para redefinir sua senha. Escolha uma nova senha pelo botão abaixo.</mj-text>
+        <mj-button href="{DATA_VARIABLE:link}" rel="noopener noreferrer">Escolher nova senha</mj-button>
+        <mj-text color="#ffb7c4" font-size="13px" line-height="21px">Por segurança, este link expira em <strong>{DATA_VARIABLE:validade}</strong> e só pode ser usado uma vez.</mj-text>
+        <mj-divider border-color="#333541" border-width="1px" padding="4px 28px 22px" />
+        <mj-text color="#aaa9ba" font-size="13px" line-height="22px" padding-bottom="14px">Não foi você? Ignore este e-mail. Sua senha permanece a mesma até que uma nova seja salva.</mj-text>
+        <mj-text color="#aaa9ba" font-size="12px" line-height="20px" padding-bottom="8px">Se o botão não abrir, copie e cole este endereço no navegador:</mj-text>
+        <mj-text css-class="link-seguro" font-size="12px" line-height="20px"><a href="{DATA_VARIABLE:link}" style="color:#ff8fa3;text-decoration:underline;word-break:break-all;">{DATA_VARIABLE:link}</a></mj-text>
+      </mj-column></mj-section>
+    </mj-wrapper>
+    <mj-section padding="26px 20px 32px"><mj-column>
+      <mj-text align="center" color="#f0eaf0" font-size="14px" font-weight="700" padding="0 0 10px">Inspire, crie e publique.</mj-text>
+      <mj-text align="center" color="#868594" font-size="11px" line-height="18px" padding="0 0 12px">Easy Content Post · Mensagem de segurança da sua conta.<br/>Nunca compartilhe seus links de acesso ou sua senha.</mj-text>
+      <mj-text align="center" font-size="11px" padding="0"><a href="{unsubscribe_link}" style="color:#868594;text-decoration:underline;">Preferências de e-mail</a></mj-text>
+    </mj-column></mj-section>
+  </mj-body>
+</mjml>
