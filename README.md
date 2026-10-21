@@ -11,6 +11,10 @@ O painel (repositório `content-post`) fala com esta API por `POST /api`.
 
 O **Mega Brain** usa `listarMegaBrain` e `gerarEstrategiaMegaBrain` para salvar estratégias por organização. As perguntas guiadas são locais; a síntese usa Claude na fila `estrategia` e está incluída no plano. `buscarIdeias` aceita `estrategia`, `etapa` (`topo`, `meio` ou `fundo`) e um UUID `pedido` para gerar ideias contextualizadas, descontando uma busca. O pedido é idempotente; falhas da geração devolvem a busca. A migração `028_mega_brain.sql` cria o histórico e os vínculos das ideias.
 
+`enviarFonteMarca` recebe `base64` e `nome` opcional, valida TTF/OTF/WOFF/WOFF2 com FontKit (até 5 MB) e guarda a fonte no volume com vínculo à organização. `listar` devolve `tipografias`; a diagramação usa `fonte: "marca-<uuid>"`, validada também nas opções por slide e em modelos salvos. A migração `029_fontes_marca.sql` cria esse cadastro; não há nova variável de ambiente.
+
+Os slides e cenas podem conter `blocos`, uma lista de até oito textos com `tipo` (destaque, apoio ou selo), `x`, `y`, `largura`, `altura` (percentuais), `tamanho`, `alinhar`, `cor` e `caixa`. A IA pode propor essas composições e `salvarTextos` permite editá-las sem perder os prompts de mídia. A estrutura antiga de título e texto continua aceita. Alterar textos ou a diagramação invalida as artes anteriores; os arquivos originais de mídia são preservados.
+
 ## Subir no Railway
 
 1. No Railway, crie um projeto e adicione um **Postgres** (New › Database › PostgreSQL).

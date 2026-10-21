@@ -13,6 +13,8 @@ import { redesConectadas } from "../provedores/index.js";
 import { usar, devolver, limiteModelos } from "../planos.js";
 import { perfilInstagram, sitePublico } from "../tarefas/entrada.js";
 import { ehAdmin } from "../admin.js";
+import { FONTE_MARCA, fontesDaMarca, conferirFontes } from "../tipografia.js";
+import { limparBlocos } from "../blocos-texto.js";
 
 const LOGOS = ["Logo", "LogoDark", "SimboloLight", "SimboloDark"];
 const STATUS_IDEIA = ["Sugerida", "Aprovada", "Descartada", "Guardada"];
@@ -72,7 +74,7 @@ function limparDiag(d = {}, { modelo = false, slide = false } = {}) {
     posicao: um(d.posicao, ["auto", "topo", "meio", "base"]),
     ...(d.modelo === "proprio" && UUID.test(String(d.proprio || "")) ? { proprio: String(d.proprio) } : {}),
     modelo: um(d.modelo, ["foto", "video", "proprio", "editorial", "lateral", "impacto", "minimal", "manchete", "cinema", "grade", "claro", "escuro", "original"]),
-    fonte: um(d.fonte, ["auto", "poppins", "anton", "bebas", "archivo", "playfair", "dmserif"]),
+    fonte: FONTE_MARCA.test(String(d.fonte || "")) ? d.fonte : um(d.fonte, ["auto", "poppins", "anton", "bebas", "archivo", "playfair", "dmserif"]),
     fundo: um(d.fundo, ["auto", "claro", "escuro", "marca"]),
     v: 3, // versão da diagramação: "auto" no fundo usa o padrão de cada modelo; Reels e Stories têm o modelo "video"
     logo: um(d.logo, ["auto", "light", "dark", "simLight", "simDark", "nenhum"]),
@@ -140,7 +142,7 @@ export const acoesPauta = {
   async listar(ctx) {
     const m = (await db().query("select * from marcas where org_id = $1", [ctx.org])).rows[0];
     const fontes = (await db().query("select * from fontes where org_id = $1 order by nome", [ctx.org])).rows;
-    return { marca: await marcaParaPainel(m), fontes: fontes.map(fonteParaPainel), ...(await modelosDaMarca(ctx.org, m)) };
+    return { marca: await marcaParaPainel(m), fontes: fontes.map(fonteParaPainel), tipografias:await fontesDaMarca(ctx.org), ...(await modelosDaMarca(ctx.org, m)) };
   },
 
   /* ---------- modelos do perfil (a partir dos posts que a marca já publica) ---------- */
@@ -166,6 +168,7 @@ export const acoesPauta = {
   // Modelo montado à mão no editor da marca (sem IA): cria um novo ou atualiza um que já existe.
   async salvarModeloMarca(ctx, b) {
     const diag = limparDiag(b.diagramacao, { modelo: true }), nome = texto(b.nome, 40) || "Modelo da marca";
+    await conferirFontes(ctx.org,diag);
     if (diag.proprio && !(await db().query("select 1 from modelos_marca where id = $1 and org_id = $2 and spec is not null", [diag.proprio, ctx.org])).rows.length) { delete diag.proprio; diag.modelo = "foto"; }
     if (b.id) {
       const r = await db().query("update modelos_marca set nome = $3, diag = $4 where id = $1 and org_id = $2 and diag is not null returning id", [exigirId(b.id), ctx.org, nome, JSON.stringify(diag)]);
@@ -424,6 +427,7 @@ export const acoesPauta = {
     const redes = [...new Set((Array.isArray(b.redes) ? b.redes : []).filter(r => REDES_PUBLICACAO.includes(r)))];
     if (!redes.length) falha("Escolha pelo menos uma rede.");
     let diag = limparDiag(b.diagramacao || { modelo: "original" });
+    await conferirFontes(ctx.org,diag);
     if (diag.proprio && !(await db().query("select 1 from modelos_marca where id = $1 and org_id = $2 and status = 'pronto' and spec is not null", [diag.proprio, ctx.org])).rows.length) falha("Modelo não encontrado nesta organização.", 404);
     const fotos = {}, clipes = {}, slides = [];
     ordenados.forEach((a, i) => { (a.tipo === "video/mp4" ? clipes : fotos)[i + 1] = a.arquivo_id; slides.push({ n: i + 1, titulo: "", texto: "", usa_imagem: a.tipo !== "video/mp4" }); });
@@ -483,6 +487,7 @@ export const acoesPauta = {
     const p = await postDaOrg(ctx.org, b.id);
     if (["Publicando", "Publicado"].includes(p.status)) falha("Este post já foi publicado ou está sendo publicado.");
     const diag = limparDiag(b.diagramacao);
+    await conferirFontes(ctx.org,diag);
     if (diag.modelo === "original") {
       if (p.origem !== "envio") falha("Sem diagramação está disponível para posts enviados prontos.");
       const fontes = { ...p.fotos, ...p.clipes }, ids = Object.keys(fontes).map(Number).sort((a, b) => a - b).map(n => fontes[n]);
@@ -490,7 +495,7 @@ export const acoesPauta = {
       await apagarArquivos(ctx.org, (p.artes || []).filter(id => !ids.includes(id)));
       return {};
     }
-    await db().query("update posts set diagramacao = $2, artes_prontas = case when $3 then false else artes_prontas end, atualizado_em = now() where id = $1", [p.id, JSON.stringify(diag), !!b.refazer]);
+    await db().query("update posts set diagramacao = $2, artes_prontas = case when $3 or diagramacao is distinct from $2::jsonb then false else artes_prontas end, atualizado_em = now() where id = $1", [p.id, JSON.stringify(diag), !!b.refazer]);
     return {};
   },
 
@@ -514,7 +519,8 @@ export const acoesPauta = {
     const slides = novos.map((n, i) => {
       const num = Number(n && n.n) || i + 1;
       const velho = atuais.find((x, k) => (Number(x.n) || k + 1) === num) || { n: num };
-      return { ...velho, titulo: texto(n && n.titulo, 300), texto: texto(n && n.texto, 1500) };
+      const blocos = n && Object.hasOwn(n,"blocos") ? limparBlocos(n.blocos,true) : velho.blocos;
+      return { ...velho, titulo: texto(n && n.titulo, 300), texto: texto(n && n.texto, 1500), ...(blocos !== undefined ? {blocos} : {}) };
     });
     const legenda = texto(b.legenda, 2200), hashtags = texto(b.hashtags, 600);
     // Reels e stories em vídeo guardam o roteiro em "cenas"; o resto, em "slides".

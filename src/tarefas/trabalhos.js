@@ -9,6 +9,7 @@ import { lerArquivo } from "../arquivos.js";
 import { legendarEnviado } from "./entrada.js";
 import "./exemplos.js";
 import { contextoMegaBrain } from "../mega-brain.js";
+import { prepararComposicoes } from "../blocos-texto.js";
 
 // Story em imagem estática segue o caminho das fotos (1 imagem vertical); os outros stories e os Reels são vídeo.
 // Story em imagem: uma só ("imagem") ou uma sequência de várias telas ("sequencia"); os dois seguem o caminho das fotos.
@@ -335,6 +336,7 @@ registrar("criar", Object.assign(async (org, { post: id }) => {
   const mood = await moodBoard(org, m);
   const content = mood.length ? [{ type: "text", text: "Mood board da marca (referência de estilo):" }, ...mood, { type: "text", text: pedidoUsuario }] : pedidoUsuario;
   const c = await claude(org, { system: SISTEMA_POST, content, effort: "high", tipo: "post" });
+  prepararComposicoes(c);
   const video = ehVideo(post.formato, post);
   // Liga as mídias do banco antes de salvar: o conteúdo guardado já sai com usa_imagem/usa_video certos.
   const doBanco = aplicarBanco(c, banco.mapa);
@@ -364,6 +366,7 @@ registrar("ajustar", Object.assign(async (org, { post: id, comentario, slide = 0
   const user = [blocoMarca(m), "", `<versao_atual numero="${post.versao}">`, JSON.stringify(atual, null, 1), "</versao_atual>", "",
     "<historico>", post.historico_ajustes || "", "</historico>", "", "<comentario>", comentario, "</comentario>"].join("\n");
   const c = await claude(org, { system: SISTEMA_AJUSTE, content: user, effort: "medium", tipo: "ajuste" });
+  prepararComposicoes(c);
   const video = ehVideo(post.formato, post);
   let regerar = (video && !(c.alterou_imagens || []).length ? c.alterou_slides : c.alterou_imagens || []).map(Number).filter(Boolean);
   if (novaImagem && !slide) regerar = [...new Set(regerar.concat((c.slides || c.cenas || []).filter(s => s.usa_imagem || s.usa_video || video).map((s, i) => Number(s.n) || i + 1)))];

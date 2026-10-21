@@ -11,6 +11,7 @@ import { infoArquivo, lerPedaco } from "./arquivos.js";
 import { acoesConta, acoesOrg } from "./acoes/conta.js";
 import { acoesPauta } from "./acoes/pauta.js";
 import { acoesMegaBrain } from "./mega-brain.js";
+import { acoesTipografia } from "./tipografia.js";
 import { ErroIntegracao } from "./provedores/index.js";
 import { relatorioCsv, chaveRelatorioOk } from "./relatorio.js";
 import { painelAdmin } from "./admin.js";
@@ -33,7 +34,7 @@ const acoesPlano = {
     return { situacao: s, ...c };
   },
 };
-const TODAS = { ...acoesConta, ...acoesOrg, ...acoesPauta, ...acoesPlano, ...acoesMegaBrain };
+const TODAS = { ...acoesConta, ...acoesOrg, ...acoesPauta, ...acoesPlano, ...acoesMegaBrain, ...acoesTipografia };
 
 // Limite simples por IP para login e cadastro (evita tentativa de senha em massa).
 const tentativas = new Map();
