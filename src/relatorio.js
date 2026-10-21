@@ -67,7 +67,7 @@ export async function linhasRelatorio() {
     const situacao = !temOrg ? "sem organização" : isenta ? "isenta" : pago ? (ativo ? "assinante ativo" : "assinatura vencida") : (ativo ? "teste grátis" : "teste vencido");
     const u = de(uso, p.org), c = de(consumo, p.org), cm = de(consumoMes, p.org), po = de(posts, p.org), k = pagamentos.get(p.org);
     // valor real pago na última cobrança (com cupom); sem ele, o preço de tabela
-    const valorCiclo = pago && CICLOS[p.ciclo] ? (p.pago_centavos ? p.pago_centavos / 100 : plano.de ? totalDo(plano, p.ciclo) : 0) : 0;
+    const valorCiclo = pago && CICLOS[p.ciclo] ? (p.pago_centavos ? p.pago_centavos / 100 : plano.precos ? totalDo(plano, p.ciclo) : 0) : 0;
     return {
       nome: p.nome, email: p.email, cadastrado_em: dataIso(p.criado_em), ultimo_acesso: dataIso(p.ultimo_acesso),
       organizacao: p.organizacao || "", papel: p.papel || "", pessoas_na_org: temOrg ? de(membros, p.org).n : "", org_criada_em: dataIso(p.org_criada_em),

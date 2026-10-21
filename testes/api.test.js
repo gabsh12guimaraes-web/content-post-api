@@ -268,11 +268,12 @@ test("planos: limite do teste, aviso da Kiwify ativa o plano e assinatura falsa 
   const cat = await chamar({ acao: "planos" });
   assert.equal(cat.planos.length, 3);
   assert.equal(cat.planos.find(p => p.id === "profissional").ciclos.find(c => c.ciclo === "anual").total, 4811.4);
-  process.env.NASTEN_CHECKOUT = JSON.stringify({ "essencial:mensal": "https://app.nasten.com.br/checkout/abc" });
+  process.env.NASTEN_CHECKOUT = JSON.stringify({ "essencial:mensal": "https://app.nasten.com.br/checkout/abc?coupon=ESSENCIALMENSAL&utm_source=teste" });
   const em = (await chamar({ acao: "planos" })).planos.find(p => p.id === "essencial").ciclos.find(c => c.ciclo === "mensal");
   delete process.env.NASTEN_CHECKOUT;
   assert.equal(em.porMes, 177.12);
-  assert.equal(em.checkout, "https://app.nasten.com.br/checkout/abc?coupon=ESSENCIALMENSAL");
+  assert.equal(em.checkout, "https://app.nasten.com.br/checkout/abc?utm_source=teste");
+  assert.equal(em.cupom, null);
 
   process.env.COBRANCA = "sim";
   try {

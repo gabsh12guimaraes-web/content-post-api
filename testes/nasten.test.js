@@ -9,7 +9,7 @@ process.env.NASTEN_SECRET_KEY = "teste-secreta";
 const { conectar, db, desconectar } = await import("../src/db.js");
 const { criarApp } = await import("../src/app.js");
 const { assinaturaNastenOk, processarEventosNasten, reconciliarNasten, fimDoCiclo, consultarNasten } = await import("../src/nasten.js");
-const { OFERTAS_NASTEN } = await import("../src/ofertas.js");
+const { OFERTAS_NASTEN, OFERTAS_NASTEN_ANTIGAS } = await import("../src/ofertas.js");
 const { catalogo } = await import("../src/planos.js");
 const original = globalThis.fetch, vendas = new Map();
 let app, n=0, auths=0, negarToken=false, indisponivel=false, lista=[];
@@ -56,11 +56,16 @@ before(async()=>{
 });
 after(async()=>{await processarEventosNasten();globalThis.fetch=original;await app.close();await desconectar();});
 
-test("catálogo tem os nove checkouts Nasten e preserva preços, cupons e contexto da organização",async()=>{
+test("catálogo usa os nove novos checkouts sem cupom e preserva preços e contexto da organização",async()=>{
   process.env.KIWIFY_CHECKOUT=JSON.stringify({"essencial:mensal":"https://pay.kiwify.com.br/antigo"});
   const c=catalogo();delete process.env.KIWIFY_CHECKOUT;
   assert.equal(c.provedor,"nasten");assert.equal(c.planos.flatMap(p=>p.ciclos).length,9);
-  for(const p of c.planos)for(const ciclo of p.ciclos){const u=new URL(ciclo.checkout);assert.equal(u.host,"app.nasten.com.br");assert.equal(u.pathname,"/checkout/"+OFERTAS_NASTEN[p.id+":"+ciclo.ciclo].slug);assert.equal(u.searchParams.get("coupon"),(p.id+ciclo.ciclo).toUpperCase());}
+  const esperados={essencial:[['1b00ye7',177.12],['n2004ue',1017],['lb1040d',1989.36]],profissional:[['1i204x5',420.96],['w7304kn',2469.42],['qj40411',4811.4]],agencia:[['wn504iq',1107.36],['sn604vs',6478.02],['y910yjc',12665.4]]};
+  for(const p of c.planos)for(const [i,ciclo] of p.ciclos.entries()){
+    const u=new URL(ciclo.checkout),[slug,total]=esperados[p.id][i];
+    assert.equal(u.host,"app.nasten.com.br");assert.equal(u.pathname,"/checkout/"+slug);assert(!u.searchParams.has("coupon"));
+    assert.equal(ciclo.total,total);assert.equal(ciclo.cupom,null);assert.equal(ciclo.desconto,0);assert.equal(ciclo.dePorMes,ciclo.porMes);
+  }
   const u=await cadastrar(),privado=await api({acao:"plano"},u.token);
   for(const p of privado.planos)for(const ciclo of p.ciclos){const link=new URL(ciclo.checkout);assert.equal(link.searchParams.get("sck"),u.organizacao.id);assert.equal(link.searchParams.get("email"),u.email);}
   assert.equal(c.planos[0].ciclos[0].porMes,177.12);assert.equal(c.planos[1].ciclos[2].total,4811.4);
@@ -70,7 +75,29 @@ test("catálogo tem os nove checkouts Nasten e preserva preços, cupons e contex
   delete process.env.PAGAMENTOS_PROVEDOR;delete process.env.KIWIFY_CHECKOUT;
 });
 
+test("as nove novas ofertas liberam o plano e o ciclo corretos com o valor final da compra",async()=>{
+  const valores={"essencial:mensal":17712,"essencial:semestral":101700,"essencial:anual":198936,"profissional:mensal":42096,"profissional:semestral":246942,"profissional:anual":481140,"agencia:mensal":110736,"agencia:semestral":647802,"agencia:anual":1266540};
+  for(const [chave,amount] of Object.entries(valores)){
+    const u=await cadastrar(),c=venda(u,chave,{amount,netAmount:amount-500}),[plano,ciclo]=chave.split(":");
+    assert.equal((await aviso(c)).statusCode,202);await esperar(c);
+    const pago=await org(u);assert.equal(pago.plano,plano);assert.equal(pago.ciclo,ciclo);assert.equal(pago.pago_centavos,amount);assert.equal(pago.liquido_centavos,amount-500);
+  }
+});
+
+test("ofertas antigas continuam reconhecendo renovações e valores históricos sem voltar ao catálogo",async()=>{
+  const u=await cadastrar(),chave="profissional:anual",o=OFERTAS_NASTEN_ANTIGAS[chave];
+  const antigo=venda(u,chave,{amount:874800,netAmount:820000,aprovedAt:new Date(Date.now()-86400000).toISOString()});
+  antigo.sale.mainOfferId=o.id;antigo.product.id=o.produto;await aviso(antigo);await esperar(antigo);const primeiro=await org(u);
+  const renovacao=venda(u,chave,{amount:481140,netAmount:450000});renovacao.sale.mainOfferId=o.id;renovacao.product.id=o.produto;
+  await aviso(renovacao);await esperar(renovacao);const pago=await org(u);
+  assert.equal(pago.plano,"profissional");assert.equal(pago.ciclo,"anual");assert(+(pago.plano_ate)>+(primeiro.plano_ate));assert.equal(pago.pago_centavos,481140);
+  const semAviso=await cadastrar(),c=venda(semAviso,chave,{amount:874800,netAmount:820000});
+  const v=vendas.get(c.transaction.id);v.TransactionItems=[{name:"Content Post - Profissional",quantity:1,amount:874800}];lista=[v];
+  try{await reconciliarNasten();assert.equal((await org(semAviso)).plano,"profissional");assert.equal((await org(semAviso)).ciclo,"anual");}finally{lista=[];}
+});
+
 test("assinatura usa corpo bruto, segredo não vazio e timestamp recente; ping não libera plano",async()=>{
+  const antes=(await db().query("select count(*)::int as n from nasten_eventos")).rows[0].n;
   const c=venda(await cadastrar()),t=String(Date.now()),raw=JSON.stringify(c,null,2);
   const h=crypto.createHmac("sha256",process.env.NASTEN_WEBHOOK_SECRET).update(t+"."+raw).digest("hex");
   assert(assinaturaNastenOk(raw,`t=${t},v1=${h}`));assert(!assinaturaNastenOk(JSON.stringify(c),`t=${t},v1=${h}`));
@@ -81,7 +108,7 @@ test("assinatura usa corpo bruto, segredo não vazio e timestamp recente; ping n
   assert.equal((await app.inject({method:"POST",url:"/nasten",payload:c})).statusCode,401);
   assert.equal((await aviso({...c,scope:"postback"})).statusCode,400);
   assert.equal((await aviso({...c,transaction:{...c.transaction,sandbox:true}})).json().ignorado,"teste");
-  assert.equal((await db().query("select count(*)::int as n from nasten_eventos")).rows[0].n,0);
+  assert.equal((await db().query("select count(*)::int as n from nasten_eventos")).rows[0].n,antes);
 });
 
 test("pagamento confirmado ativa plano; entregas repetidas não prolongam acesso nem armazenam documento",async()=>{

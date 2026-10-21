@@ -10,23 +10,29 @@
 4. Copie o `signatureSecret` **desse webhook** para a variável `NASTEN_WEBHOOK_SECRET` no Railway e aplique/republique as variáveis. Não é a chave secreta da API. A Nasten informa esse segredo na criação/consulta do webhook; veja a [documentação de webhooks](https://nasten.mintlify.site/pages/webhook/overview).
 5. Mantenha `TRABALHADOR` ligado (padrão: variável ausente ou diferente de `nao`) e `NASTEN_SANDBOX=nao` em produção. Não precisa mudar `CHAVE_MESTRA`, as chaves de IA, os limites dos planos ou os dados dos clientes.
 6. Teste uma venda no ambiente de teste separado ou confira uma compra real aprovada já existente, reenviando seu evento pelo painel da Nasten. O plano deve aparecer em **Plano** da organização correta. Reenviar o mesmo evento não deve estender novamente o acesso. Não faça cobranças reais só para testar a configuração.
-7. A migração foi liberada para publicação após a configuração e a validação da cobrança pelo responsável pela conta. O catálogo da API usa a Nasten por padrão e a versão do site está no PR de migração. A variável temporária `PAGAMENTOS_PROVEDOR` não precisa ser configurada e, se ainda existir no Railway, pode ser removida; ela não altera mais os links.
+7. A migração foi liberada para publicação após a configuração e a validação da cobrança pelo responsável pela conta. O catálogo da API usa a Nasten por padrão e o site usa os checkouts atuais. A variável temporária `PAGAMENTOS_PROVEDOR` não precisa ser configurada e, se ainda existir no Railway, pode ser removida; ela não altera mais os links.
 
-## Ofertas e cupons
+## Ofertas com preço final
 
 | Plano | Mensal | Semestral | Anual | Afiliados |
 | --- | --- | --- | --- | --- |
-| Essencial | [xk10c2k](https://app.nasten.com.br/checkout/xk10c2k) | [et20cqs](https://app.nasten.com.br/checkout/et20cqs) | [6t20djh](https://app.nasten.com.br/checkout/6t20djh) | [Solicitar](https://app.nasten.com.br/join/afiliate/8y30w7u) |
-| Profissional | [5d6038k](https://app.nasten.com.br/checkout/5d6038k) | [78703pn](https://app.nasten.com.br/checkout/78703pn) | [d110wxt](https://app.nasten.com.br/checkout/d110wxt) | [Solicitar](https://app.nasten.com.br/join/afiliate/m220w7q) |
-| Agência | [g6b03qk](https://app.nasten.com.br/checkout/g6b03qk) | [wic0399](https://app.nasten.com.br/checkout/wic0399) | [6jd030e](https://app.nasten.com.br/checkout/6jd030e) | [Solicitar](https://app.nasten.com.br/join/afiliate/5he032m) |
+| Essencial | [1b00ye7](https://app.nasten.com.br/checkout/1b00ye7) | [n2004ue](https://app.nasten.com.br/checkout/n2004ue) | [lb1040d](https://app.nasten.com.br/checkout/lb1040d) | [Solicitar](https://app.nasten.com.br/join/afiliate/8y30w7u) |
+| Profissional | [1i204x5](https://app.nasten.com.br/checkout/1i204x5) | [w7304kn](https://app.nasten.com.br/checkout/w7304kn) | [qj40411](https://app.nasten.com.br/checkout/qj40411) | [Solicitar](https://app.nasten.com.br/join/afiliate/m220w7q) |
+| Agência | [wn504iq](https://app.nasten.com.br/checkout/wn504iq) | [sn604vs](https://app.nasten.com.br/checkout/sn604vs) | [y910yjc](https://app.nasten.com.br/checkout/y910yjc) | [Solicitar](https://app.nasten.com.br/join/afiliate/5he032m) |
 
-Os nove cupons foram conferidos no checkout e reconhecidos com os mesmos percentuais: `ESSENCIALMENSAL` 52%, `ESSENCIALSEMESTRAL` 50%, `ESSENCIALANUAL` 46%; `PROFISSIONALMENSAL` 52%, `PROFISSIONALSEMESTRAL` 49%, `PROFISSIONALANUAL` 45%; `AGENCIAMENSAL` 52%, `AGENCIASEMESTRAL` 49%, `AGENCIAANUAL` 45%. Os links continuam levando `coupon=CODIGO`, mas o checkout observado não aplica esse parâmetro automaticamente. Por isso o site e o painel mostram o código para copiar e aplicar no campo de cupom. O preço anunciado é à vista com desconto; os juros do parcelamento são definidos no checkout Nasten.
+Os nove checkouts usam os preços finais, sem cupom:
 
-Na conferência dos nove checkouts em Pix, os totais com cupom corresponderam aos valores anunciados. O cartão pode continuar exibindo o total cheio apesar do cupom; a cobrança foi testada pelo responsável pela conta, que confirmou tratar-se de uma divergência visual e liberou a publicação. O site Content Post não controla a exibição do formulário hospedado na Nasten. Nenhuma cobrança real foi realizada pelos testes automatizados.
+| Plano | Mensal | Semestral (6 meses) | Anual (12 meses) |
+| --- | ---: | ---: | ---: |
+| Essencial | R$ 177,12 | R$ 1.017,00 | R$ 1.989,36 |
+| Profissional | R$ 420,96 | R$ 2.469,42 | R$ 4.811,40 |
+| Agência | R$ 1.107,36 | R$ 6.478,02 | R$ 12.665,40 |
+
+Os preços à vista foram conferidos nos nove checkouts públicos. O site e o painel não enviam nem mostram códigos de desconto. Desative os cupons antigos na Nasten para evitar descontos adicionais sobre os preços novos. Juros de parcelamento são definidos no checkout Nasten. Nenhuma cobrança real é feita pelos testes automatizados.
 
 Compras dentro da plataforma levam `sck=<organização>` e `email=<e-mail>` para a Nasten. O comprador deve usar o e-mail da conta Content Post: o preenchimento automático de e-mail não é presumido. Compras pela landing são conciliadas pelo e-mail do dono quando ele identifica uma única organização. Quem administra várias deve comprar pelo botão **Plano** da organização desejada. Uma compra antes do cadastro é reprocessada depois do cadastro com o mesmo e-mail.
 
-As ofertas públicas atuais (ids 93 a 101 e produtos correspondentes) estão em `src/ofertas.js`. Se recriar ofertas, ajuste esse arquivo ou `NASTEN_OFERTAS` (`{"novo-id-da-oferta":"essencial:mensal"}`), e `NASTEN_CHECKOUT` se trocar URLs. Nunca confie no nome ou no plano enviado pelo navegador para liberar acesso.
+As ofertas públicas atuais (ids 102 a 110 e produtos correspondentes) estão em `src/ofertas.js`. Os mesmos três produtos continuam sendo usados; não é necessário trocar chaves nem recriar o webhook por causa desses links. As ofertas anteriores, ids 93 a 101, permanecem reconhecidas para eventos atrasados, renovações e conciliação, mas não aparecem no catálogo. Se recriar ofertas, ajuste esse arquivo ou `NASTEN_OFERTAS` (`{"novo-id-da-oferta":"essencial:mensal"}`), e `NASTEN_CHECKOUT` se trocar URLs. Nunca confie no nome ou no plano enviado pelo navegador para liberar acesso.
 
 ## Transição e financeiro
 

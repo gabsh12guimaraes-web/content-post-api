@@ -2,7 +2,7 @@
 import crypto from "node:crypto";
 import { db } from "./db.js";
 import { UUID, ErroApi } from "./erros.js";
-import { OFERTAS_NASTEN } from "./ofertas.js";
+import { OFERTAS_NASTEN, OFERTAS_NASTEN_ANTIGAS } from "./ofertas.js";
 import { PLANOS, CICLOS, totalDo } from "./planos.js";
 
 const BASE = "https://api.nasten.net";
@@ -53,10 +53,10 @@ export async function consultarNasten(caminho) {
 
 function ofertaDo(c) {
   let extras = {}; try { extras = JSON.parse(process.env.NASTEN_OFERTAS || "{}"); } catch {}
-  const par = Object.entries(OFERTAS_NASTEN).find(([, o]) => o.id === Number(c.sale?.mainOfferId) && o.produto === c.product?.id);
+  const par = [...Object.entries(OFERTAS_NASTEN), ...Object.entries(OFERTAS_NASTEN_ANTIGAS)].find(([, o]) => o.id === Number(c.sale?.mainOfferId) && o.produto === c.product?.id);
   const chave = extras[c.sale?.mainOfferId] || par?.[0];
   const [plano, ciclo] = String(chave || "").split(":");
-  if (!PLANOS[plano]?.de || !CICLOS[ciclo]) return null;
+  if (!PLANOS[plano]?.precos || !CICLOS[ciclo]) return null;
   return { plano, ciclo };
 }
 
@@ -149,11 +149,12 @@ export async function processarEventosNasten() {
 }
 
 // A API não informa a oferta na consulta de uma venda. Na conciliação sem webhook,
-// só reconhece itens Content Post com preço exato de uma das nove ofertas (cheio ou com o cupom).
+// Só reconhece os totais exatos dos planos, incluindo as cobranças anteriores à troca de ofertas.
 function ofertaDaVenda(v) {
   const candidatos = Object.entries(OFERTAS_NASTEN).filter(([chave]) => {
     const [plano,ciclo] = chave.split(":"), p = PLANOS[plano];
-    return (v.TransactionItems || []).some(i => normal(i.name).includes("content post") && normal(i.name).includes(plano) && Number(i.quantity) === 1 && [Math.round(totalDo(p,ciclo)*100),Math.round(p.de[ciclo]*CICLOS[ciclo]*100)].includes(Number(i.amount)));
+    const valores = [totalDo(p,ciclo), OFERTAS_NASTEN_ANTIGAS[chave]?.total].filter(Number.isFinite).map(v => Math.round(v*100));
+    return (v.TransactionItems || []).some(i => normal(i.name).includes("content post") && normal(i.name).includes(plano) && Number(i.quantity) === 1 && valores.includes(Number(i.amount)));
   });
   return candidatos.length === 1 ? candidatos[0][1] : null;
 }

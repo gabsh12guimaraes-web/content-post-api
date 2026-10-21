@@ -37,7 +37,7 @@ export async function painelAdmin(ctx) {
     if (s === "assinante") {
       const p = PLANOS[o.plano], meses = CICLOS[o.ciclo] || 1;
       // Usa o líquido real do provedor. A estimativa Kiwify fica restrita às vendas anteriores.
-      const tabela = p && p.de && CICLOS[o.ciclo] ? totalDo(p, o.ciclo) : 0;
+      const tabela = p && p.precos && CICLOS[o.ciclo] ? totalDo(p, o.ciclo) : 0;
       const total = o.pago_centavos ? o.pago_centavos / 100 : tabela;
       const liquido = o.liquido_centavos != null ? o.liquido_centavos / 100 : o.pagamento_provedor === "nasten" ? total : total ? total - (total * KIWIFY.taxa + KIWIFY.fixa) : 0;
       if (o.pagamento_provedor === "nasten" && o.liquido_centavos == null) taxasPendentes++;
