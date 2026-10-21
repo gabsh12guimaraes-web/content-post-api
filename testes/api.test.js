@@ -776,6 +776,22 @@ test("tamanho do texto por slide fica na diagramação, só com valores válidos
   assert.equal(d.modelo, "impacto");
 });
 
+test("diagramação por imagem preserva o visual geral, limita os campos e isola organizações", async () => {
+  const p = (await db().query("insert into posts (org_id,titulo,data_publicacao,rede,formato,status,artes_prontas) values ($1,'Carrossel com visuais diferentes',now() + interval '1 day','Instagram','Carrossel','EmRevisao',true) returning id", [anaOrg])).rows[0];
+  const diagramacao = { modelo: "editorial", fundo: "claro", escalas: { 2: 1.35 }, slides: {
+    2: { modelo: "cinema", alinhar: "centro", fundo: "escuro", fonte: "playfair", slides: { 1: { modelo: "impacto" } }, escalas: { 1: 5 }, audio: "mudo", extra: "ignorar" },
+    3: { logo: "nenhum" }, 0: { modelo: "impacto" }, 21: { modelo: "grade" }, "2x": { modelo: "minimal" }, 4: null,
+  } };
+  assert.equal((await chamar({ acao: "salvarDiagramacao", id: p.id, diagramacao, refazer: true }, ana)).status, 200);
+  const salvo = (await chamar({ acao: "pauta" }, ana)).posts.find(x => x.id === p.id), d = JSON.parse(salvo.Diagramacao);
+  assert.equal(d.modelo, "editorial"); assert.equal(d.fundo, "claro"); assert.equal(salvo.ArtesProntas, false);
+  assert.deepEqual(d.escalas, { 2: 1.35 });
+  assert.deepEqual(d.slides, { 2: { modelo: "cinema", alinhar: "centro", fundo: "escuro", fonte: "playfair" }, 3: { logo: "nenhum" } });
+  assert.equal((await chamar({ acao: "salvarDiagramacao", id: p.id, diagramacao: { modelo: "foto" } }, carla)).status, 404);
+  assert.deepEqual((await db().query("select diagramacao from posts where id=$1", [p.id])).rows[0].diagramacao, d);
+  await db().query("delete from posts where id=$1", [p.id]);
+});
+
 test("lê o JSON do Claude com texto em volta ou dividido em vários objetos", async () => {
   const { extrairJson } = await import("../src/provedores/index.js");
   assert.deepEqual(extrairJson('{"ideias":[{"titulo":"a"}]}'), { ideias: [{ titulo: "a" }] });

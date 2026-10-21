@@ -64,7 +64,7 @@ async function conferirLimiteModelos(org) {
   if (total >= lim.maximo) falha(`O plano ${lim.plano} guarda até ${lim.maximo} modelo${lim.maximo === 1 ? "" : "s"}. Remova um ou mude de plano para salvar mais.`, 402, { plano: true });
 }
 // Diagramação válida (a mesma da revisão). Num modelo salvo, "escala" é o tamanho do texto de todas as imagens.
-function limparDiag(d = {}, { modelo = false } = {}) {
+function limparDiag(d = {}, { modelo = false, slide = false } = {}) {
   const um = (v, lista) => (lista.includes(v) ? v : lista[0]);
   const diag = {
     alinhar: um(d.alinhar, ["esquerda", "centro", "direita"]),
@@ -91,6 +91,18 @@ function limparDiag(d = {}, { modelo = false } = {}) {
   if (modelo && diag.modelo === "video") diag.modelo = "foto";
   if (modelo && diag.modelo === "original") diag.modelo = "foto";
   if (modelo) delete diag.audio; // o áudio é escolha de cada post, não do modelo
+  if (!modelo && !slide && d.slides && typeof d.slides === "object" && !Array.isArray(d.slides)) {
+    const slides = {};
+    const chaves = ["alinhar", "posicao", "modelo", "proprio", "fonte", "fundo", "logo", "logoPos"];
+    for (const [n, ajuste] of Object.entries(d.slides)) {
+      if (!/^(?:[1-9]|1[0-9]|20)$/.test(n) || !ajuste || typeof ajuste !== "object" || Array.isArray(ajuste)) continue;
+      const limpo = limparDiag({ ...diag, ...ajuste }, { slide: true });
+      if (limpo.modelo === "original") limpo.modelo = "foto";
+      const campos = Object.fromEntries(chaves.filter(k => Object.hasOwn(ajuste, k) && limpo[k] !== undefined).map(k => [k, limpo[k]]));
+      if (Object.keys(campos).length) slides[n] = campos;
+    }
+    if (Object.keys(slides).length) diag.slides = slides;
+  }
   return diag;
 }
 const anexosIds = lista => (Array.isArray(lista) ? lista : []).map(a => a && a.id).filter(id => UUID.test(String(id || "")));
