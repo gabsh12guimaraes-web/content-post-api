@@ -26,6 +26,7 @@ test('fontes reais TTF, OTF, WOFF e WOFF2 são validadas, guardadas e entregues 
  assert.equal((await chamar({acao:'listar'},b.token)).tipografias.length,0);
 });
 test('reenvio simultâneo não duplica fonte; arquivos inválidos e grandes são recusados',async()=>{
+ assert.equal((await chamar({acao:'enviarFonteMarca',organizacao:b.organizacao.id,base64:arquivo('ttf')})).status,409);
  const antes=(await db().query('select count(*)::int n from arquivos where org_id=$1',[a.organizacao.id])).rows[0].n;
  const [x,y]=await Promise.all([chamar({acao:'enviarFonteMarca',base64:arquivo('ttf')}),chamar({acao:'enviarFonteMarca',base64:arquivo('ttf')})]);assert.equal(x.id,fonte);assert.equal(y.id,fonte);
  assert.equal((await db().query('select count(*)::int n from arquivos where org_id=$1',[a.organizacao.id])).rows[0].n,antes);

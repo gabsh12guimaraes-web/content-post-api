@@ -18,6 +18,7 @@ export async function fontesDaMarca(org) {
 }
 export const acoesTipografia = {
   async enviarFonteMarca(ctx, b) {
+    if (b.organizacao && b.organizacao !== ctx.org) falha("A organização mudou durante o envio. Escolha o arquivo novamente.", 409);
     if (typeof b.base64 !== "string" || b.base64.length > 7 * 1024 * 1024) falha("Envie uma fonte de até 5 MB.");
     const dados = Buffer.from(b.base64, "base64");
     if (dados.length < 32 || dados.length > 5 * 1024 * 1024) falha("Envie uma fonte válida de até 5 MB.");
