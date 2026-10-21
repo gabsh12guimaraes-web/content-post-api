@@ -319,11 +319,16 @@ export const acoesPauta = {
     // Cada slide tem uma mídia só: trocar por vídeo tira a foto (e vice-versa), senão a antiga continua valendo.
     const antigas = [mapa[n], outro[n]].filter(x => x && x !== img.arquivo_id);
     mapa[n] = img.arquivo_id; delete outro[n];
-    const marcar = lista => (Array.isArray(lista) ? lista : []).map((s, i) => ((Number(s.n) || i + 1) === n ? { ...s, ...(video ? { usa_video: true } : { usa_imagem: true }) } : s));
+    const marcar = lista => (Array.isArray(lista) ? lista : []).map((s, i) => ((Number(s.n) || i + 1) === n ? { ...s, usa_video: video, usa_imagem: !video } : s));
     const conteudo = { ...(p.conteudo || {}) };
     for (const k of ["slides", "cenas"]) if (Array.isArray(conteudo[k])) conteudo[k] = marcar(conteudo[k]);
-    await db().query("update posts set fotos = $2, clipes = $3, slides = $4, conteudo = $5, artes_prontas = false, atualizado_em = now() where id = $1",
-      [p.id, JSON.stringify(fotos), JSON.stringify(clipes), JSON.stringify(marcar(p.slides)), JSON.stringify(conteudo)]);
+    const slides = marcar(p.slides), emVideo = ["Reels", "Stories"].includes(p.formato) && !["imagem", "sequencia"].includes(p.briefing?.story);
+    const prompts = Array.isArray(conteudo.prompts_imagem) ? conteudo.prompts_imagem : [];
+    const necessarias = slides.map((s, i) => ({ ...s, n: Number(s.n) || i + 1 })).filter(s => emVideo || s.usa_imagem || s.usa_video || prompts.some(x => Number(x.slide) === s.n));
+    const completas = necessarias.length > 0 && necessarias.every(s => fotos[s.n] || clipes[s.n]);
+    const erroGeracao = /^(?:A conta do Magnific está sem créditos:|\d+ imagem\(ns\) ou clipe\(s\) não foram gerados pelo Magnific\.)/i.test(String(p.erro || ""));
+    await db().query("update posts set fotos = $2, clipes = $3, slides = $4, conteudo = $5, artes_prontas = false, erro = $6, atualizado_em = now() where id = $1",
+      [p.id, JSON.stringify(fotos), JSON.stringify(clipes), JSON.stringify(slides), JSON.stringify(conteudo), completas && erroGeracao ? null : p.erro]);
     // Só apaga o que nenhuma outra tela do post usa mais.
     const emUso = new Set([...Object.values(fotos), ...Object.values(clipes), ...(p.artes || [])]);
     const soltas = antigas.filter(x => !emUso.has(x));

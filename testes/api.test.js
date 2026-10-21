@@ -997,6 +997,37 @@ test("trocar a foto de um story por vídeo do banco tira a foto antiga (e vice-v
   assert.equal((await db().query("select count(*)::int as n from arquivos where id = $1", [arqV])).rows[0].n, 1, "o vídeo continua no banco");
 });
 
+test("Reels com fotos do banco resolve falha de geração e permite aprovar o vídeo sem chamar o Magnific", async () => {
+  const imagem = await chamar({ acao: "enviarImagemBanco", tipo: "image/jpeg", nome: "foto-reels.jpg", base64: JPG, descrever: false }, ana);
+  const cenas = [1, 2].map(n => ({ n, titulo: "Cena " + n, texto: "Texto preservado", usa_video: true }));
+  const aviso = "A conta do Magnific está sem créditos: 2 imagem(ns) ou clipe(s) não foram gerados. Use fotos do Banco de imagens.";
+  const post = (await db().query(`insert into posts (org_id,titulo,formato,rede,status,data_publicacao,slides,conteudo,erro)
+    values ($1,'Reels com fotos escolhidas','Reels','Instagram','EmRevisao',now()+interval '5 days',$2,$3,$4) returning id`,
+    [anaOrg, JSON.stringify(cenas), JSON.stringify({ cenas }), aviso])).rows[0];
+  const original = globalThis.fetch, chamadas = [];
+  globalThis.fetch = async url => { chamadas.push(String(url)); throw new Error("Nenhuma chamada externa esperada"); };
+  try {
+    assert.equal((await chamar({ acao: "trocarFotoSlide", id: post.id, slide: 1, imagem: imagem.id }, ana)).status, 200);
+    let p = (await db().query("select * from posts where id=$1", [post.id])).rows[0];
+    assert.equal(p.erro, aviso, "mantém o aviso enquanto a segunda cena não tem mídia");
+    assert.equal(p.slides[0].usa_video, false); assert.equal(p.slides[0].usa_imagem, true);
+    assert.equal(p.conteudo.cenas[0].usa_video, false); assert.equal(p.slides[1].texto, "Texto preservado");
+    assert.equal((await chamar({ acao: "trocarFotoSlide", id: post.id, slide: 2, imagem: imagem.id }, ana)).status, 200);
+    p = (await db().query("select * from posts where id=$1", [post.id])).rows[0];
+    assert.equal(p.erro, null, "limpa somente a falha de geração resolvida");
+    assert.equal(Object.keys(p.fotos).length, 2); assert.deepEqual(p.clipes, {}); assert.equal(p.artes_prontas, false);
+    assert.equal((await chamar({ acao: "aprovarPost", id: post.id }, ana)).status, 400, "ainda exige montar o arquivo final");
+    await db().query("update posts set erro='Confira a conexão do Instagram.' where id=$1", [post.id]);
+    await chamar({ acao: "trocarFotoSlide", id: post.id, slide: 1, imagem: imagem.id }, ana);
+    assert.equal((await db().query("select erro from posts where id=$1", [post.id])).rows[0].erro, "Confira a conexão do Instagram.", "preserva avisos de outros problemas");
+    const MP4 = Buffer.from("000000186674797069736f6d0000020069736f6d69736f32", "hex").toString("base64");
+    assert.equal((await chamar({ acao: "salvarArtes", id: post.id, artes: [{ tipo: "video/mp4", base64: MP4 }] }, ana)).status, 200);
+    assert.equal((await chamar({ acao: "aprovarPost", id: post.id }, ana)).status, 200);
+    assert.equal((await db().query("select status from posts where id=$1", [post.id])).rows[0].status, "Agendado");
+    assert.deepEqual(chamadas, [], "trocar, montar e aprovar não pede geração ou download ao provedor");
+  } finally { globalThis.fetch = original; }
+});
+
 test("revisão: login em paralelo bloqueia, limite do plano aguenta concorrência, hashtags e criarPost duplo", async () => {
   // senha errada em paralelo: o bloqueio de 5 tentativas vale
   const em = "paralelo" + Date.now() + "@x.com";
