@@ -10,6 +10,7 @@ import { ErroApi, UUID } from "./erros.js";
 import { infoArquivo, lerPedaco } from "./arquivos.js";
 import { acoesConta, acoesOrg } from "./acoes/conta.js";
 import { acoesPauta } from "./acoes/pauta.js";
+import { acoesMegaBrain } from "./mega-brain.js";
 import { ErroIntegracao } from "./provedores/index.js";
 import { relatorioCsv, chaveRelatorioOk } from "./relatorio.js";
 import { painelAdmin } from "./admin.js";
@@ -32,7 +33,7 @@ const acoesPlano = {
     return { situacao: s, ...c };
   },
 };
-const TODAS = { ...acoesConta, ...acoesOrg, ...acoesPauta, ...acoesPlano };
+const TODAS = { ...acoesConta, ...acoesOrg, ...acoesPauta, ...acoesPlano, ...acoesMegaBrain };
 
 // Limite simples por IP para login e cadastro (evita tentativa de senha em massa).
 const tentativas = new Map();

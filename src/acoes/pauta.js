@@ -4,7 +4,8 @@ import { db } from "../db.js";
 import { falha, exigirId, texto, UUID } from "../erros.js";
 import { salvarArquivo, guardarDeUrl, apagarArquivos, anexos } from "../arquivos.js";
 import { marcaParaPainel, fonteParaPainel, ideiaParaPainel, postsParaPainel } from "../formato.js";
-import { enfileirar } from "../tarefas/fila.js";
+import { enfileirar, puxar } from "../tarefas/fila.js";
+import { contextoMegaBrain } from "../mega-brain.js";
 import { cifrar } from "../cripto.js";
 import { podeGerir } from "./conta.js";
 import { publicarJa, REDES_PUBLICACAO, escolherDoBanco } from "../tarefas/trabalhos.js";
@@ -563,8 +564,6 @@ export const acoesPauta = {
   },
 
   async buscarIdeias(ctx, b) {
-    const rodando = await db().query("select 1 from tarefas where org_id = $1 and tipo = 'ideias' and status in ('pendente', 'rodando')", [ctx.org]);
-    if (rodando.rows.length) falha("Já estou buscando ideias para esta organização. Aguarde terminar.");
     // Pedido opcional do painel: tema, quantas ideias e quais formatos.
     const FORMATOS = ["Reels", "Carrossel", "Estatico", "Stories"];
     const pedido = {
@@ -572,9 +571,21 @@ export const acoesPauta = {
       quantidade: Math.max(1, Math.min(20, parseInt(b.quantidade, 10) || 10)),
       formatos: (Array.isArray(b.formatos) ? b.formatos : []).filter(f => FORMATOS.includes(f)),
     };
-    await usar(ctx.org, "ideias");
-    try { await enfileirar(ctx.org, "ideias", pedido, ctx.usuario.id); } catch (e) { await devolver(ctx.org, "ideias"); throw e; }
-    return {};
+    if (b.estrategia) { await contextoMegaBrain(ctx.org, b.estrategia, b.etapa); pedido.estrategia = b.estrategia; pedido.etapa = b.etapa; }
+    if (b.pedido) pedido.pedido = exigirId(b.pedido, "Pedido de ideias inválido.");
+    const id = await db().transacao(async tx => {
+      await tx.query("select id from organizacoes where id=$1 for update", [ctx.org]);
+      if (pedido.pedido) {
+        const anterior = (await tx.query("select id from tarefas where org_id=$1 and tipo='ideias' and payload->>'pedido'=$2", [ctx.org,pedido.pedido])).rows[0];
+        if (anterior) return anterior.id;
+      }
+      const rodando = await tx.query("select 1 from tarefas where org_id=$1 and tipo='ideias' and status in ('pendente','rodando')", [ctx.org]);
+      if (rodando.rows.length) falha("Já estou buscando ideias para esta organização. Aguarde terminar.");
+      await usar(ctx.org, "ideias", tx);
+      return enfileirar(ctx.org, "ideias", pedido, ctx.usuario.id, tx);
+    });
+    setImmediate(() => puxar().catch(() => {}));
+    return { id };
   },
 
   // Publicação que falhou (ou saiu só em parte das redes): tenta de novo agora. O que já saiu não é repetido.

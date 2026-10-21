@@ -5,9 +5,10 @@ const EM_PARALELO = 3;
 const TRABALHOS = {};
 let rodando = 0, parar = false, timers = [];
 
-export async function enfileirar(org, tipo, payload, usuario) {
-  const { rows } = await db().query("insert into tarefas (org_id, tipo, payload, criado_por) values ($1, $2, $3, $4) returning id", [org, tipo, JSON.stringify(payload || {}), usuario || null]);
-  setImmediate(() => puxar().catch(() => {}));
+export async function enfileirar(org, tipo, payload, usuario, tx = null) {
+  const { rows } = await (tx || db()).query("insert into tarefas (org_id, tipo, payload, criado_por) values ($1, $2, $3, $4) returning id", [org, tipo, JSON.stringify(payload || {}), usuario || null]);
+  // Quem usa transação chama puxar depois do commit, para o trabalhador já enxergar a tarefa.
+  if (!tx) setImmediate(() => puxar().catch(() => {}));
   return rows[0].id;
 }
 

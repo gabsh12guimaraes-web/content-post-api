@@ -9,6 +9,8 @@ API da **Pauta de Conteúdo**. Várias organizações usam a mesma plataforma, c
 
 O painel (repositório `content-post`) fala com esta API por `POST /api`.
 
+O **Mega Brain** usa `listarMegaBrain` e `gerarEstrategiaMegaBrain` para salvar estratégias por organização. As perguntas guiadas são locais; a síntese usa Claude na fila `estrategia` e está incluída no plano. `buscarIdeias` aceita `estrategia`, `etapa` (`topo`, `meio` ou `fundo`) e um UUID `pedido` para gerar ideias contextualizadas, descontando uma busca. O pedido é idempotente; falhas da geração devolvem a busca. A migração `028_mega_brain.sql` cria o histórico e os vínculos das ideias.
+
 ## Subir no Railway
 
 1. No Railway, crie um projeto e adicione um **Postgres** (New › Database › PostgreSQL).

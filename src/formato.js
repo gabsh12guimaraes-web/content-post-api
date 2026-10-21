@@ -24,6 +24,7 @@ export const ideiaParaPainel = (i, postsDaIdeia = []) => ({
   id: i.id, Titulo: i.titulo, Resumo: i.resumo, Formato: i.formato, Rede: i.rede, Pilar: i.pilar, Score: Number(i.score),
   PorQueFunciona: i.por_que, Status: i.status, MotivoDescarte: i.motivo_descarte, Referencias: i.referencias || [],
   Calendario: postsDaIdeia, CriadaEm: i.criada_em,
+  Estrategia: i.estrategia_id || null, EtapaFunil: i.etapa_funil || null,
 });
 
 export async function postsParaPainel(org, posts) {

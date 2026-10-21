@@ -64,9 +64,9 @@ export async function situacao(org, q = db()) {
 }
 
 // Confere o limite antes de gastar IA e registra o uso.
-export async function usar(org, tipo) {
+export async function usar(org, tipo, transacao = null) {
   // Conta e registra numa transação com a organização travada: pedidos em paralelo não passam do limite.
-  return db().transacao(async tx => {
+  const contar = async tx => {
   await tx.query("select id from organizacoes where id = $1 for update", [org]);
   if (cobrancaLigada()) {
     const s = await situacao(org, tx);
@@ -79,7 +79,8 @@ export async function usar(org, tipo) {
     }
   }
   await tx.query("insert into uso (org_id, tipo) values ($1, $2)", [org, tipo]);
-  });
+  };
+  return transacao ? contar(transacao) : db().transacao(contar);
 }
 // Quantos modelos da marca (do perfil e montados à mão) a organização pode guardar. Sem cobrança ligada ou isenta, o teto é alto.
 export async function limiteModelos(org) {
