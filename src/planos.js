@@ -30,9 +30,8 @@ export const isentos = () => (env.EMAILS_ISENTOS || "").split(",").map(s => s.tr
 // KIWIFY_CHECKOUT não é usado nos novos checkouts, mesmo que ainda esteja configurado no Railway.
 const comCupom = (u, codigo) => { if (!u) return null; try { const x = new URL(u); if (codigo) x.searchParams.set("coupon", codigo); return x.toString(); } catch (e) { return null; } };
 export function catalogo() {
-  // Publicar o receptor antes de virar o checkout permite configurar e validar a Nasten sem interromper vendas.
-  const nasten = env.PAGAMENTOS_PROVEDOR === "nasten";
-  const links = nasten ? { ...CHECKOUT_NASTEN, ...lerJson("NASTEN_CHECKOUT") } : lerJson("KIWIFY_CHECKOUT");
+  // A migração foi liberada: variáveis antigas não podem redirecionar novas compras para a Kiwify.
+  const links = { ...CHECKOUT_NASTEN, ...lerJson("NASTEN_CHECKOUT") };
   return {
     planos: Object.entries(PLANOS).filter(([, p]) => p.precos).map(([id, p]) => ({
       id, nome: p.nome, posts: p.posts, ideias: p.ideias, modelos: p.modelos,
@@ -41,8 +40,8 @@ export function catalogo() {
         return { ciclo, meses: CICLOS[ciclo], porMes, dePorMes: p.de[ciclo], desconto: p.cupom[ciclo] || 0, cupom, total: totalDo(p, ciclo), checkout: comCupom(links[`${id}:${ciclo}`], cupom) };
       }),
     })),
-    provedor: nasten ? "nasten" : "kiwify",
-    afiliados: nasten ? env.NASTEN_AFILIADOS || "https://easycontentpost.com.br/afiliados" : env.KIWIFY_AFILIADOS || null,
+    provedor: "nasten",
+    afiliados: env.NASTEN_AFILIADOS || "https://easycontentpost.com.br/afiliados",
     teste: { posts: PLANOS.teste.posts, dias: 7 },
   };
 }

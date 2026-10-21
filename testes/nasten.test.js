@@ -6,7 +6,6 @@ process.env.CHAVE_MESTRA = crypto.randomBytes(32).toString("base64");
 process.env.NASTEN_WEBHOOK_SECRET = crypto.randomBytes(64).toString("hex");
 process.env.NASTEN_PUBLIC_KEY = "teste-publica";
 process.env.NASTEN_SECRET_KEY = "teste-secreta";
-process.env.PAGAMENTOS_PROVEDOR = "nasten";
 const { conectar, db, desconectar } = await import("../src/db.js");
 const { criarApp } = await import("../src/app.js");
 const { assinaturaNastenOk, processarEventosNasten, reconciliarNasten, fimDoCiclo, consultarNasten } = await import("../src/nasten.js");
@@ -65,9 +64,10 @@ test("catálogo tem os nove checkouts Nasten e preserva preços, cupons e contex
   const u=await cadastrar(),privado=await api({acao:"plano"},u.token);
   for(const p of privado.planos)for(const ciclo of p.ciclos){const link=new URL(ciclo.checkout);assert.equal(link.searchParams.get("sck"),u.organizacao.id);assert.equal(link.searchParams.get("email"),u.email);}
   assert.equal(c.planos[0].ciclos[0].porMes,177.12);assert.equal(c.planos[1].ciclos[2].total,4811.4);
-  delete process.env.PAGAMENTOS_PROVEDOR;process.env.KIWIFY_CHECKOUT=JSON.stringify({"essencial:mensal":"https://pay.kiwify.com.br/antigo"});
-  assert.equal(catalogo().provedor,"kiwify");assert.match(catalogo().planos[0].ciclos[0].checkout,/pay.kiwify.com.br/);
-  process.env.PAGAMENTOS_PROVEDOR="nasten";delete process.env.KIWIFY_CHECKOUT;
+  // A configuração temporária usada antes da liberação não restaura links antigos depois da migração.
+  process.env.PAGAMENTOS_PROVEDOR="kiwify";process.env.KIWIFY_CHECKOUT=JSON.stringify({"essencial:mensal":"https://pay.kiwify.com.br/antigo"});
+  assert.equal(catalogo().provedor,"nasten");assert.match(catalogo().planos[0].ciclos[0].checkout,/app.nasten.com.br/);
+  delete process.env.PAGAMENTOS_PROVEDOR;delete process.env.KIWIFY_CHECKOUT;
 });
 
 test("assinatura usa corpo bruto, segredo não vazio e timestamp recente; ping não libera plano",async()=>{

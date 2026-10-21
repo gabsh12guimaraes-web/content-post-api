@@ -1,6 +1,6 @@
 # Configurar a Nasten no Railway
 
-1. Complete o cadastro da empresa na Nasten e aguarde a liberação para vender. Na conferência de 20/10/2026, os nove checkouts exibiam `company_not_verified` ("Você precisa completar o seu cadastro antes de começar a vender"). Confira também se as ofertas são assinaturas, com renovação mensal, semestral e anual, conforme desejado: o título da oferta sozinho não configura recorrência.
+1. O cadastro da empresa foi liberado para vender: os nove checkouts passaram a informar `canSell: true`. Confira se as ofertas são assinaturas, com renovação mensal, semestral e anual, conforme desejado: o título da oferta sozinho não configura recorrência.
 2. Na Nasten, gere as chaves de API de **Produção**. No serviço **content-post-api** do Railway, em **Variables**, adicione `NASTEN_PUBLIC_KEY` e `NASTEN_SECRET_KEY`. Não coloque essas chaves no site, no GitHub ou em mensagens.
 3. Após publicar esta versão da API, cadastre um **webhook da conta** na Nasten apontando para:
 
@@ -10,7 +10,7 @@
 4. Copie o `signatureSecret` **desse webhook** para a variável `NASTEN_WEBHOOK_SECRET` no Railway e aplique/republique as variáveis. Não é a chave secreta da API. A Nasten informa esse segredo na criação/consulta do webhook; veja a [documentação de webhooks](https://nasten.mintlify.site/pages/webhook/overview).
 5. Mantenha `TRABALHADOR` ligado (padrão: variável ausente ou diferente de `nao`) e `NASTEN_SANDBOX=nao` em produção. Não precisa mudar `CHAVE_MESTRA`, as chaves de IA, os limites dos planos ou os dados dos clientes.
 6. Teste uma venda no ambiente de teste separado ou confira uma compra real aprovada já existente, reenviando seu evento pelo painel da Nasten. O plano deve aparecer em **Plano** da organização correta. Reenviar o mesmo evento não deve estender novamente o acesso. Não faça cobranças reais só para testar a configuração.
-7. Depois de validar também o valor final dos cupons, altere `PAGAMENTOS_PROVEDOR=nasten` no Railway e publique a versão do site da branch `migracao-nasten`. Essa é a virada dos redirecionamentos. Até esse passo, o site e o catálogo continuam com os links Kiwify atuais; o receptor Nasten já pode receber testes e eventos válidos.
+7. A migração foi liberada para publicação após a configuração e a validação da cobrança pelo responsável pela conta. O catálogo da API usa a Nasten por padrão e a versão do site está no PR de migração. A variável temporária `PAGAMENTOS_PROVEDOR` não precisa ser configurada e, se ainda existir no Railway, pode ser removida; ela não altera mais os links.
 
 ## Ofertas e cupons
 
@@ -22,7 +22,7 @@
 
 Os nove cupons foram conferidos no checkout e reconhecidos com os mesmos percentuais: `ESSENCIALMENSAL` 52%, `ESSENCIALSEMESTRAL` 50%, `ESSENCIALANUAL` 46%; `PROFISSIONALMENSAL` 52%, `PROFISSIONALSEMESTRAL` 49%, `PROFISSIONALANUAL` 45%; `AGENCIAMENSAL` 52%, `AGENCIASEMESTRAL` 49%, `AGENCIAANUAL` 45%. Os links continuam levando `coupon=CODIGO`, mas o checkout observado não aplica esse parâmetro automaticamente. Por isso o site e o painel mostram o código para copiar e aplicar no campo de cupom. O preço anunciado é à vista com desconto; os juros do parcelamento são definidos no checkout Nasten.
 
-Na conferência do checkout Essencial mensal, a Nasten mostrou "Cupom ESSENCIALMENSAL aplicado (52% off)", mas o total do cartão continuou exibindo o preço cheio com parcelamento. Isso ocorreu também ao clicar em **Aplicar**, sem realizar compra. Antes de divulgar as novas ofertas, confirme com a Nasten que o desconto está refletido no total mostrado e cobrado. O site Content Post não controla o cálculo nem o formulário hospedado na Nasten.
+Na conferência dos nove checkouts em Pix, os totais com cupom corresponderam aos valores anunciados. O cartão pode continuar exibindo o total cheio apesar do cupom; a cobrança foi testada pelo responsável pela conta, que confirmou tratar-se de uma divergência visual e liberou a publicação. O site Content Post não controla a exibição do formulário hospedado na Nasten. Nenhuma cobrança real foi realizada pelos testes automatizados.
 
 Compras dentro da plataforma levam `sck=<organização>` e `email=<e-mail>` para a Nasten. O comprador deve usar o e-mail da conta Content Post: o preenchimento automático de e-mail não é presumido. Compras pela landing são conciliadas pelo e-mail do dono quando ele identifica uma única organização. Quem administra várias deve comprar pelo botão **Plano** da organização desejada. Uma compra antes do cadastro é reprocessada depois do cadastro com o mesmo e-mail.
 

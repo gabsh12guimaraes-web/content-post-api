@@ -70,7 +70,7 @@ Nenhuma chave, senha ou token fica neste repositório. Senhas das pessoas: hash 
 
 ## Pagamentos pela Nasten
 
-Veja o passo a passo em [NASTEN.md](NASTEN.md). A virada do painel ocorre com `PAGAMENTOS_PROVEDOR=nasten`; até lá, o catálogo usa os links Kiwify atuais. Com essa variável, as novas compras usam os nove checkouts Nasten, os mesmos preços/cupons e os novos convites de afiliados. `KIWIFY_CHECKOUT` e `KIWIFY_AFILIADOS` antigos deixam de definir os links do painel. Os planos já pagos não são removidos e `/kiwify` permanece para os avisos das compras anteriores; esses avisos não alteram uma organização que já comprou na Nasten.
+Veja o passo a passo em [NASTEN.md](NASTEN.md). As novas compras usam os nove checkouts Nasten, os mesmos preços/cupons e os novos convites de afiliados. A migração está liberada: a variável temporária `PAGAMENTOS_PROVEDOR` não controla mais o catálogo. `KIWIFY_CHECKOUT` e `KIWIFY_AFILIADOS` antigos deixam de definir os links do painel. Os planos já pagos não são removidos e `/kiwify` permanece para os avisos das compras anteriores; esses avisos não alteram uma organização que já comprou na Nasten.
 
 `POST /nasten` valida o HMAC-SHA256 de `signature-hmac` com o corpo bruto e grava o evento antes de responder `202`. O teste exato `{"test":true}` responde `200` sem processar nada. A fila confirma a venda em `GET /v1/transactions/{id}`, confere a empresa e associa a organização pelo `sck` mais o e-mail de um membro; sem `sck`, só aceita um e-mail que seja dono de exatamente uma organização. Compra anterior ao cadastro fica pendente e volta a ser conferida. Nunca escolhe uma organização arbitrária quando há várias.
 
