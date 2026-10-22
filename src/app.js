@@ -62,6 +62,7 @@ async function contexto(req) {
   return { sessao: s.id, usuario: { id: s.usuario_id, email: s.email, nome: s.nome, confirmacaoPendente: confirmacaoPendente(s) }, org: m ? m.org_id : null, papel: m ? m.papel : null };
 }
 
+const LIMITE_VIDEO_BRUTO = 300 * 1024 * 1024;
 export async function criarApp() {
   const app = Fastify({ logger: false, bodyLimit: 90 * 1024 * 1024, trustProxy: Number(process.env.PROXIES_CONFIAVEIS || 1) });
   // Respostas em JSON e CSV vão comprimidas (a pauta cai de ~300 KB para ~40 KB no celular).
@@ -131,6 +132,27 @@ export async function criarApp() {
       return rep.code(206).header("content-range", `bytes ${ini}-${fim}/${total}`).header("content-length", fim - ini + 1).send(lerPedaco(a.arq, ini, fim));
     }
     return rep.header("content-length", total).send(lerPedaco(a.arq, 0, total - 1));
+  });
+
+  // Vídeo grande (ex.: .mov de 1-2 min do iPhone) chega como arquivo, sem base64, e o servidor converte para MP4.
+  app.addContentTypeParser("application/octet-stream", { parseAs: "buffer", bodyLimit: LIMITE_VIDEO_BRUTO }, (req, corpo, pronto) => pronto(null, corpo));
+  app.post("/video", { bodyLimit: LIMITE_VIDEO_BRUTO }, async (req, rep) => {
+    try {
+      const ctx = await contexto(req);
+      if (!ctx) throw new ErroApi("Sua sessão expirou. Entre de novo.", 401, { login: true });
+      if (ctx.usuario.confirmacaoPendente) throw new ErroApi("Confirme seu e-mail para continuar.", 403, { confirmarEmail: true });
+      if (!ctx.org) throw new ErroApi("Crie uma organização ou aceite um convite para começar.", 409, { semOrganizacao: true });
+      if (!Buffer.isBuffer(req.body) || !req.body.length) throw new ErroApi("Arquivo vazio.");
+      const q = req.query || {}, t0 = Date.now();
+      const r = await TODAS.enviarImagemBanco(ctx, { bruto: req.body, tipo: String(q.tipo || ""), nome: String(q.nome || "video"), titulo: String(q.titulo || ""), descrever: false });
+      console.log(`[video] envio de ${(req.body.length / 1048576).toFixed(0)} MB convertido em ${((Date.now() - t0) / 1000).toFixed(0)} s`);
+      return { ok: true, ...r };
+    } catch (e) {
+      if (e instanceof ErroApi) return rep.code(e.status).send({ ok: false, erro: e.message, ...e.extra });
+      if (e && Number(e.status) >= 400 && Number(e.status) < 500 && e.message) return rep.code(Number(e.status)).send({ ok: false, erro: e.message });
+      console.error("[video envio]", e);
+      return rep.code(500).send({ ok: false, erro: "Não consegui converter o vídeo. Tente de novo; se continuar, exporte em MP4." });
+    }
   });
 
   app.post("/api", async (req, rep) => {

@@ -1267,3 +1267,32 @@ test("produto ou objeto: sem pedir autorização, vai como referência e junto c
   assert.match(s2.prompt, /^Reference image 1 is the person\. Reference image 2 is the product\/object\./);
   await chamar({ acao: "removerPessoa", id: produto }, ana); await chamar({ acao: "removerPessoa", id: pessoa }, ana);
 });
+
+test("vídeo .mov do iPhone (HEVC) vira MP4 H.264 no servidor, com capa e já no padrão do Instagram", async () => {
+  const { spawnSync } = await import("node:child_process");
+  const ffmpeg = (await import("ffmpeg-static")).default;
+  const pasta = fs.mkdtempSync(path.join(os.tmpdir(), "mov-")), mov = path.join(pasta, "iphone.mov");
+  // vertical, HEVC + AAC em contêiner QuickTime, como sai da câmera do iPhone
+  const g = spawnSync(ffmpeg, ["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "testsrc2=s=720x1280:r=30:d=3", "-f", "lavfi", "-i", "sine=f=440:d=3",
+    "-c:v", "libx265", "-preset", "ultrafast", "-tag:v", "hvc1", "-c:a", "aac", "-shortest", mov]);
+  assert.equal(g.status, 0, String(g.stderr));
+  const r = await chamar({ acao: "enviarImagemBanco", tipo: "video/quicktime", nome: "IMG_0001.MOV", titulo: "Gravado no iPhone", base64: fs.readFileSync(mov).toString("base64"), descrever: false }, ana);
+  assert.equal(r.status, 200, r.erro);
+  const a = (await db().query("select a.* from banco_imagens b join arquivos a on a.id = b.arquivo_id where b.id = $1", [r.id])).rows[0];
+  assert.equal(a.tipo, "video/mp4"); assert.equal(a.nome, "IMG_0001.mp4"); assert.equal(a.padronizado, true); assert.equal(a.previa, true, "capa tirada do próprio vídeo");
+  const info = spawnSync(ffmpeg, ["-hide_banner", "-i", path.join(process.env.PASTA_ARQUIVOS, anaOrg, a.id)]).stderr.toString();
+  assert.match(info, /Video: h264/); assert.match(info, /Audio: aac/);
+  const ruim = await chamar({ acao: "enviarImagemBanco", tipo: "video/quicktime", nome: "x.mov", base64: Buffer.from("isto não é vídeo").toString("base64") }, ana);
+  assert.equal(ruim.status, 400); assert.match(ruim.erro, /Não consegui abrir este vídeo/);
+  assert.equal((await chamar({ acao: "enviarImagemBanco", tipo: "application/pdf", nome: "x.pdf", base64: JPG }, ana)).status, 400);
+  // arquivo grande vai inteiro pela rota /video (sem base64)
+  const corpo = fs.readFileSync(mov), url = "/video?tipo=video%2Fquicktime&nome=IMG_0002.MOV&titulo=Grande";
+  const semLogin = await app.inject({ method: "POST", url, payload: corpo, headers: { "content-type": "application/octet-stream" } });
+  assert.equal(semLogin.statusCode, 401);
+  const v = await app.inject({ method: "POST", url, payload: corpo, headers: { "content-type": "application/octet-stream", "x-pauta-token": ana } });
+  assert.equal(v.statusCode, 200, v.body);
+  const a2 = (await db().query("select a.tipo, a.nome, b.nome as titulo from banco_imagens b join arquivos a on a.id = b.arquivo_id where b.id = $1", [v.json().id])).rows[0];
+  assert.deepEqual([a2.tipo, a2.nome, a2.titulo], ["video/mp4", "IMG_0002.mp4", "Grande"]);
+  const pdf = await app.inject({ method: "POST", url: "/video?tipo=application%2Fpdf", payload: corpo, headers: { "content-type": "application/octet-stream", "x-pauta-token": ana } });
+  assert.equal(pdf.statusCode, 400);
+});

@@ -1,5 +1,6 @@
 // Marca, fontes, ideias e calendário da organização selecionada.
 import crypto from "node:crypto";
+import { converterParaMp4 } from "../video.js";
 import { db } from "../db.js";
 import { falha, exigirId, texto, UUID } from "../erros.js";
 import { salvarArquivo, guardarDeUrl, apagarArquivos, anexos } from "../arquivos.js";
@@ -21,6 +22,7 @@ const STATUS_IDEIA = ["Sugerida", "Aprovada", "Descartada", "Guardada"];
 const LIMITE_AJUSTES = 3;
 // Capa de vídeo (um quadro em JPEG ou WEBP que o painel tira do próprio vídeo): opcional, até 2 MB.
 const capaDe = v => { if (typeof v !== "string" || !v.length) return undefined; const d = Buffer.from(v, "base64"); return d.length && d.length <= 2 * 1024 * 1024 ? d : undefined; };
+const VIDEOS_PARA_CONVERTER = ["video/quicktime", "video/x-m4v", "video/webm", "video/3gpp", "video/x-matroska"];
 const doBase64 = (b64, max = 25 * 1024 * 1024) => {
   if (typeof b64 !== "string" || !b64.length) falha("Arquivo vazio.");
   const dados = Buffer.from(b64, "base64");
@@ -280,11 +282,23 @@ export const acoesPauta = {
     return {};
   },
   async enviarImagemBanco(ctx, b) {
-    if (!["image/png", "image/jpeg", "image/webp", "video/mp4"].includes(b.tipo)) falha("Envie fotos em JPG, PNG ou WEBP, ou vídeos em MP4.");
+    // .mov do iPhone e outros formatos de vídeo chegam como estão e o servidor converte para MP4 (H.264).
+    // b.bruto (Buffer) só vem da rota /video, com o arquivo inteiro; o JSON não consegue mandar um Buffer.
+    const bruto = Buffer.isBuffer(b.bruto) ? b.bruto : null;
+    if (bruto && !(VIDEOS_PARA_CONVERTER.includes(b.tipo) || b.tipo === "video/mp4")) falha("Envie um vídeo em MP4 ou MOV.");
+    let converter = VIDEOS_PARA_CONVERTER.includes(b.tipo);
+    if (!["image/png", "image/jpeg", "image/webp", "video/mp4"].includes(b.tipo) && !converter) falha("Envie fotos em JPG, PNG ou WEBP, ou vídeos em MP4 ou MOV.");
     const total = (await db().query("select count(*)::int as n from banco_imagens where org_id = $1 and origem = 'envio'", [ctx.org])).rows[0].n;
     if (total >= 300) falha("O banco aceita até 300 arquivos enviados. Remova alguns para enviar novos.");
-    const video = b.tipo === "video/mp4";
-    const arquivo = await salvarArquivo(ctx.org, { tipo: b.tipo, nome: b.nome, dados: doBase64(b.base64, (video ? 25 : 8) * 1024 * 1024), capa: video ? capaDe(b.capa) : undefined });
+    const video = b.tipo === "video/mp4" || converter;
+    let dados = bruto || doBase64(b.base64, (video ? 60 : 8) * 1024 * 1024), capa = video ? capaDe(b.capa) : undefined;
+    // MP4 acima do limite do volume também é reduzido aqui
+    if (b.tipo === "video/mp4" && dados.length > 25 * 1024 * 1024) converter = true;
+    if (converter) { const c = await converterParaMp4(dados); dados = c.dados; capa = capa || c.capa; }
+    const nomeArquivo = converter ? String(b.nome || "video").replace(/\.[^.]+$/, "") + ".mp4" : b.nome;
+    const arquivo = await salvarArquivo(ctx.org, { tipo: video ? "video/mp4" : b.tipo, nome: nomeArquivo, dados, capa });
+    // já sai no padrão do Instagram: não precisa converter de novo na hora de publicar
+    if (converter) await db().query("update arquivos set padronizado = true where id = $1", [arquivo]);
     const nome = texto(b.titulo, 80);
     const { rows } = await db().query("insert into banco_imagens (org_id, arquivo_id, nome) values ($1, $2, $3) returning id", [ctx.org, arquivo, nome]);
     // A IA descreve a foto em segundo plano (nome, descrição e etiquetas). Se não houver chave do Claude, fica para a pessoa preencher.
