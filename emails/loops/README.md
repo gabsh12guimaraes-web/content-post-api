@@ -5,24 +5,24 @@ Os três modelos incluem design responsivo, o logo da marca, botão de ação e 
 ## Importar no Loops
 
 1. Verifique seu domínio e endereço remetente no Loops. Escolha um endereço de resposta que sua equipe acompanhe.
-2. Vá a **Transactional → Create**. Use a opção de importar/upload de e-mail customizado e envie um dos ZIPs individuais: `confirmacao.zip`, `recuperacao.zip` ou `senha-alterada.zip`. Não importe o ZIP geral. Cada ZIP individual contém `index.mjml` na raiz e `img/logo.png`.
+2. Vá a **Transactional → Create**. No editor, selecione **Code** e envie um dos ZIPs individuais: `confirmacao-transacional.zip`, `recuperacao-transacional.zip` ou `senha-alterada-transacional.zip`. Não importe o ZIP geral. Cada ZIP individual contém `index.mjml` na raiz e `img/logo.png`. Se já enviou uma versão anterior, use **Upload another email** no mesmo rascunho transacional e selecione o ZIP corrigido.
 3. Configure o assunto e o preview conforme a tabela. Confira as variáveis no editor sem renomeá-las.
 4. Desative o rastreamento de cliques nos links de segurança. A URL precisa preservar o fragmento `#confirmar-email=...` ou `#redefinir-senha=...` até chegar ao app. A confirmação exige um clique na página; apenas abrir o e-mail não consome o link.
 5. Use a prévia e um envio de teste do próprio Loops para conferir a importação. Publique cada modelo e copie seu **Transactional ID** para a variável correspondente no Railway.
 
 | Arquivo | Assunto | Preview | Variáveis | Variável no Railway |
 | --- | --- | --- | --- | --- |
-| confirmacao.zip | Confirme seu e-mail \| Easy Content Post | Só falta confirmar seu endereço para começar a criar. | nome, link, validade | LOOPS_CONFIRMACAO_ID |
-| recuperacao.zip | Redefina sua senha \| Easy Content Post | Um link seguro para você voltar às suas boas ideias. | nome, link, validade | LOOPS_RECUPERACAO_ID |
-| senha-alterada.zip | Sua senha foi alterada \| Easy Content Post | Confira a atualização de segurança da sua conta. | nome, link, data | LOOPS_SENHA_ALTERADA_ID |
+| confirmacao-transacional.zip | Confirme seu e-mail \| Easy Content Post | Só falta confirmar seu endereço para começar a criar. | nome, link, validade | LOOPS_CONFIRMACAO_ID |
+| recuperacao-transacional.zip | Redefina sua senha \| Easy Content Post | Um link seguro para você voltar às suas boas ideias. | nome, link, validade | LOOPS_RECUPERACAO_ID |
+| senha-alterada-transacional.zip | Sua senha foi alterada \| Easy Content Post | Confira a atualização de segurança da sua conta. | nome, link, data | LOOPS_SENHA_ALTERADA_ID |
 
-O MJML usa a sintaxe oficial `{DATA_VARIABLE:nome}`. O link de preferências `{unsubscribe_link}` é exigido pelo importador do Loops. Cadastre os modelos como **transacionais**, sem transformá-los em campanhas ou inscrever o destinatário em marketing. A API envia `addToAudience: false`.
+O MJML usa a sintaxe oficial `{DATA_VARIABLE:nome}`. E-mails **transacionais** não aceitam o link de descadastro `{unsubscribe_link}`; os três modelos não contêm esse link. Cadastre os modelos em **Transactional**, sem transformá-los em campanhas ou inscrever o destinatário em marketing. A API envia `addToAudience: false`.
 
 Referência do importador: https://loops.so/docs/creating-emails/uploading-custom-email
 
 ## Ativar no Railway
 
-No serviço **content-post-api → Variables**, cadastre:
+No projeto **content-post**, serviço **api → Variables**, cadastre:
 
 ```dotenv
 LOOPS_API_KEY=chave_cadastrada_somente_no_Railway

@@ -28,7 +28,6 @@
     <mj-section padding="26px 20px 32px"><mj-column>
       <mj-text align="center" color="#f0eaf0" font-size="14px" font-weight="700" padding="0 0 10px">Inspire, crie e publique.</mj-text>
       <mj-text align="center" color="#868594" font-size="11px" line-height="18px" padding="0 0 12px">Easy Content Post · Mensagem de segurança da sua conta.<br/>Nunca compartilhe seus links de acesso ou sua senha.</mj-text>
-      <mj-text align="center" font-size="11px" padding="0"><a href="{unsubscribe_link}" style="color:#868594;text-decoration:underline;">Preferências de e-mail</a></mj-text>
     </mj-column></mj-section>
   </mj-body>
 </mjml>
