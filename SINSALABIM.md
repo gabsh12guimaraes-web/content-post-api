@@ -14,7 +14,7 @@ SHOTSTACK_API_KEY=sua_chave_de_producao_do_Shotstack
 SHOTSTACK_SANDBOX=nao
 ```
 
-4. O editor reutiliza a integração Claude da organização ou da plataforma. Apenas o Sinsalabim usa `claude-sonnet-4-6` por padrão. Para escolher outro modelo, configure `SINSALABIM_MODELO`; os outros fluxos continuam usando `MODELO_CLAUDE`.
+4. O editor reutiliza a integração Claude da organização ou da plataforma e o mesmo modelo dos outros fluxos (`MODELO_CLAUDE`, padrão `claude-opus-5-5`), que recebe os quadros do vídeo, a transcrição e a conversa e devolve o plano de edição. Para usar outro modelo só no Sinsalabim, configure `SINSALABIM_MODELO` com um modelo da geração 5 (a chamada usa o fallback automático do servidor, que os modelos 4.x não aceitam).
 5. Confira `URL_PUBLICA`: precisa apontar para o domínio HTTPS público da API. O Shotstack acessa o vídeo e as imagens pelos links assinados da plataforma. Endereços locais ou internos não servem para uma exportação real.
 6. Aplique as variáveis e publique o commit mais recente do repositório `content-post-api`, branch `main`. A migração `032_sinsalabim.sql` roda automaticamente. Mantenha o trabalhador ligado (`TRABALHADOR` diferente de `nao`), pois ele processa a análise e recupera o resultado da exportação.
 

@@ -29,7 +29,7 @@ globalThis.fetch=async(url,op={})=>{
   return Response.json({text:'Olá mundo, vamos criar.',duration:2,words:[{word:'Olá',start:.1,end:.4},{word:'mundo',start:.5,end:.8},{word:'vamos',start:1,end:1.3},{word:'criar',start:1.4,end:1.8}]});
  }
  if(u==='https://api.anthropic.com/v1/messages'){
-  analises++;const req=JSON.parse(op.body);assert(req.system.includes('Sinsalabim'));return Response.json({content:[{type:'text',text:JSON.stringify(planoBase)}],usage:{input_tokens:300,output_tokens:200},stop_reason:'end_turn'});
+  analises++;const req=JSON.parse(op.body);assert(req.system.includes('Sinsalabim'));assert.equal(req.model,'claude-opus-5-5','usa o modelo padrão da plataforma');assert.equal(op.headers['x-api-key'] && op.headers['anthropic-version'],'2023-06-01');assert(req.max_tokens>=16000);const conteudo=req.messages[0].content;assert(conteudo.some(c=>c.type==='image'),'manda quadros do vídeo');assert(conteudo.some(c=>c.type==='text'&&c.text.includes('transcricao')),'manda a transcrição');return Response.json({content:[{type:'text',text:JSON.stringify(planoBase)}],usage:{input_tokens:300,output_tokens:200},stop_reason:'end_turn'});
  }
  if(/^https:\/\/api.shotstack.io\/edit\/(v1|stage)\/render$/.test(u)){
   renders++;assert.equal(op.headers['x-api-key'],u.includes('/stage/')?'shotstack-sandbox-teste':'shotstack-somente-teste');const t=JSON.parse(op.body);assert.equal(t.output.aspectRatio,'9:16');assert(t.timeline.tracks.some(t=>t.clips.some(c=>c.asset.type==='html5')));
