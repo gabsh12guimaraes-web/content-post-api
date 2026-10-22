@@ -20,6 +20,7 @@ import { catalogo, situacao, assinaturaKiwifyOk, avisoKiwify } from "./planos.js
 import { midiasLogin, arquivoLogin } from "./vitrine.js";
 import { assinaturaNastenOk, receberAvisoNasten } from "./nasten.js";
 import { acoesEmail, confirmacaoPendente } from "./autenticacao-email.js";
+import { acoesSinsalabim } from "./sinsalabim.js";
 
 const PUBLICAS = new Set(["cadastrar", "entrar", "verConvite", "planos", "vitrineLogin", ...Object.keys(acoesEmail)]);
 const SEM_ORG = new Set(["eu", "sair", "trocarSenha", "aceitarConvite", "criarOrganizacao", "trocarOrganizacao", "painelAdmin"]);
@@ -36,7 +37,7 @@ const acoesPlano = {
     return { situacao: s, ...c };
   },
 };
-const TODAS = { ...acoesConta, ...acoesOrg, ...acoesPauta, ...acoesPlano, ...acoesMegaBrain, ...acoesTipografia, ...acoesAcervoMagnific, ...acoesEmail };
+const TODAS = { ...acoesConta, ...acoesOrg, ...acoesPauta, ...acoesPlano, ...acoesMegaBrain, ...acoesTipografia, ...acoesAcervoMagnific, ...acoesEmail, ...acoesSinsalabim };
 
 // Limite simples por IP para login e cadastro (evita tentativa de senha em massa).
 const tentativas = new Map();

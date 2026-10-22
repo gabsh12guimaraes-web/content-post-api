@@ -19,9 +19,10 @@ let fila = Promise.resolve();
 const umPorVez = fn => { const r = fila.then(fn, fn); fila = r.catch(() => {}); return r; };
 
 // Até quatro quadros pequenos do arquivo local para entender um post pronto, sem alterar o vídeo.
-export function quadrosDoVideo(arq) {
+export function quadrosDoVideo(arq, { intervalo = 15 } = {}) {
   return umPorVez(() => new Promise((ok, falha) => {
-    const p = spawn(ffmpeg, ["-hide_banner", "-i", arq, "-vf", "select='isnan(prev_selected_t)+gte(t-prev_selected_t,15)',scale=640:-2", "-fps_mode", "vfr", "-frames:v", "4", "-f", "image2pipe", "-c:v", "mjpeg", "pipe:1"], { stdio: ["ignore", "pipe", "ignore"] });
+    const segundos = Math.max(1, Math.min(300, Number(intervalo) || 15));
+    const p = spawn(ffmpeg, ["-hide_banner", "-i", arq, "-vf", `select='isnan(prev_selected_t)+gte(t-prev_selected_t,${segundos})',scale=640:-2`, "-fps_mode", "vfr", "-frames:v", "4", "-f", "image2pipe", "-c:v", "mjpeg", "pipe:1"], { stdio: ["ignore", "pipe", "ignore"] });
     const partes = []; let tamanho = 0;
     const t = setTimeout(() => { p.kill("SIGKILL"); falha(new Error("Não consegui ler o vídeo a tempo.")); }, 30000);
     p.stdout.on("data", d => { tamanho += d.length; if (tamanho > 4 * 1024 * 1024) { p.kill("SIGKILL"); return; } partes.push(d); });

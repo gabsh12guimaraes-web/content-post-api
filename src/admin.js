@@ -9,7 +9,7 @@ import { config } from "./config.js";
 const admins = () => (process.env.ADMIN_EMAILS || "gabsh12guimaraes@gmail.com").split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
 export const ehAdmin = email => admins().includes(String(email || "").toLowerCase());
 
-const PROVEDORES = ["anthropic", "magnific", "apify", "zernio"];
+const PROVEDORES = ["anthropic", "magnific", "apify", "zernio", "groq", "shotstack"];
 const dia = d => new Date(d).toISOString().slice(0, 10);
 const r2 = v => Math.round(v * 100) / 100;
 

@@ -9,6 +9,8 @@ API da **Pauta de Conteúdo**. Várias organizações usam a mesma plataforma, c
 
 O painel (repositório `content-post`) fala com esta API por `POST /api`.
 
+O **Sinsalabim** edita vídeos enviados por meio de conversa, com transcrição Groq, planejamento Claude e renderização Shotstack. A prévia é local; exportar exige confirmação e usa um limite separado de 5 vídeos por organização/mês. [Configuração e operação](SINSALABIM.md).
+
 Confirmação de e-mail e recuperação de senha usam links de uso único e entrega transacional pelo Loops. Os modelos com design, as variáveis de ambiente e o passo a passo de ativação estão em [emails/loops/README.md](emails/loops/README.md). A confirmação é ativada para novos cadastros por `AUTH_EMAIL_ATIVO=sim`, após configurar os modelos. Contas anteriores mantêm acesso. A origem nativa do iOS (`capacitor://localhost`) é aceita além das origens web configuradas.
 
 O **Mega Brain** usa `listarMegaBrain` e `gerarEstrategiaMegaBrain` para salvar estratégias por organização. As perguntas guiadas são locais; a síntese usa Claude na fila `estrategia` e está incluída no plano. `buscarIdeias` aceita `estrategia`, `etapa` (`topo`, `meio` ou `fundo`) e um UUID `pedido` para gerar ideias contextualizadas, descontando uma busca. O pedido é idempotente; falhas da geração devolvem a busca. A migração `028_mega_brain.sql` cria o histórico e os vínculos das ideias.

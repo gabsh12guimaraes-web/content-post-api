@@ -42,12 +42,12 @@ async function pedir(url, opcoes, tempoMs = 120000) {
 const esperar = ms => new Promise(r => setTimeout(r, ms));
 
 /* ---------- Claude ---------- */
-export async function claude(org, { system, content, effort = "medium", max_tokens = 16000, tipo = "" }) {
+export async function claude(org, { system, content, effort = "medium", max_tokens = 16000, tipo = "", modelo = config.modeloClaude }) {
   const chave = await chaveDe(org, "anthropic");
   const r = await pedir("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "content-type": "application/json", "x-api-key": chave, "anthropic-version": "2023-06-01", "anthropic-beta": "server-side-fallback-2026-07-01" },
-    body: JSON.stringify({ model: config.modeloClaude, max_tokens, output_config: { effort }, fallbacks: "default", system, messages: [{ role: "user", content }] }),
+    body: JSON.stringify({ model: modelo, max_tokens, output_config: { effort }, fallbacks: "default", system, messages: [{ role: "user", content }] }),
   }, 600000);
   const j = r.json || {};
   const u = j.usage || {};

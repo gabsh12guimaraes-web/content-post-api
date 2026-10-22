@@ -167,7 +167,10 @@ export async function padronizarVideosDe(org, ids) {
 
 export async function apagarArquivos(org, ids) {
   if (!ids.length) return;
-  const { rows } = await db().query("delete from arquivos where org_id = $1 and id = any($2::uuid[]) and id not in (select arquivo_id from banco_imagens where org_id = $1) returning id", [org, ids]);
+  const { rows } = await db().query(`delete from arquivos where org_id = $1 and id = any($2::uuid[])
+    and id not in (select arquivo_id from banco_imagens where org_id = $1)
+    and id not in (select arquivo_id from sinsalabim_edicoes where org_id = $1)
+    and id not in (select arquivo_id from sinsalabim_exportacoes where org_id = $1 and arquivo_id is not null) returning id`, [org, ids]);
   await Promise.all(rows.flatMap(r => [fs.rm(caminho(org, r.id), { force: true }), fs.rm(caminho(org, r.id) + ".p", { force: true })]));
 }
 

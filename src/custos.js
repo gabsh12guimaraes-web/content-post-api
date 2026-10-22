@@ -6,6 +6,8 @@ export const CUSTO = {
   magnific: { foto: 0.07, foto_pessoa: 0.07, clipe: 0.1 },                 // por foto; clipe por segundo
   apify: { coleta: 0.0023 },                                                // por item coletado
   zernio: { publicacao: 16 / 120 },                                         // plano Build: US$ 16 por 120 posts
+  groq: { minuto: 0.04 / 60 },                                             // Whisper Turbo: áudio transcrito
+  shotstack: { minuto: 0.20 },                                             // preço avulso por minuto de vídeo exportado
   railwayOrgMesBrl: 5,                                                      // servidor, por organização ativa no mês (R$)
 };
 export const KIWIFY = { taxa: 0.0899, fixa: 2.49 };
