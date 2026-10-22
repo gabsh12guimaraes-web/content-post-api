@@ -122,3 +122,27 @@ test('uma exportação Sandbox mantém seu ambiente e não entra na revisão de 
  const e=(await db().query('select * from sinsalabim_exportacoes where id=$1',[r.id])).rows[0];assert.equal(e.status,'feito');assert.equal(e.ambiente,'stage');
  assert.equal((await api({acao:'revisarSinsalabim',exportacao:r.id,data:new Date(Date.now()+86400000).toISOString()},token)).status,400);
 });
+
+test('edição de retenção: destaques gigantes, apoio no topo, transições, cor viva e legenda em pílula', () => {
+  const palavras = [{texto:'O',inicio:0.1,fim:0.2},{texto:'carvão',inicio:0.3,fim:0.8},{texto:'mancha',inicio:1.0,fim:1.4},{texto:'o',inicio:1.5,fim:1.6},{texto:'esmalte.',inicio:4.1,fim:4.6},{texto:'fim',inicio:5.6,fim:5.9}];
+  const banco = [{id:'img-1',url:'https://api.example.com/f/1/k'}];
+  const p = limparPlanoSinsa({...planoBase, visual:'vibrante', legendaEstilo:'pilula',
+    cortes:[{inicio:0,fim:2,transicao:'zoom'},{inicio:4,fim:5.5,transicao:'deslizar'},{inicio:5.5,fim:6,transicao:'explodir'}],
+    destaques:[{indice:4},{indice:1,texto:'CARVÃO',apoio:'não clareia'},{indice:2},{indice:99},{indice:3.5}],
+    apoios:[{banco:'img-1',inicio:0.5,duracao:1.5,layout:'topo'},{banco:'img-1',inicio:2.2,duracao:1,layout:'girar'}]}, 6, banco, palavras);
+  assert.deepEqual(p.cortes.map(c=>c.transicao), ['corte','deslizar','corte'], 'o primeiro trecho entra seco e transição desconhecida vira corte');
+  assert.equal(p.visual,'vibrante'); assert.equal(p.legendaEstilo,'pilula');
+  assert.deepEqual(p.apoios.map(a=>a.layout), ['topo','tela']);
+  // "esmalte." foi dito aos 4.1 s do original = 2.1 s na edição (o trecho de 2 a 4 s saiu); "mancha" encosta no destaque anterior e cai
+  assert.deepEqual(p.destaques.map(d=>[d.texto,d.inicio]), [['CARVÃO',0.25],['esmalte',2.05]]);
+  assert.equal(p.destaques[0].apoio,'não clareia');
+  const t = timelineSinsa(p,'https://api.example.com/f/v/k',banco), trilhas = t.timeline.tracks.flatMap(x=>x.clips), json = JSON.stringify(t);
+  const videos = trilhas.filter(c=>c.asset.type==='video');
+  assert(videos.every(c=>c.filter==='boost'), 'cor viva no vídeo todo');
+  assert.equal(videos[0].transition, undefined); assert.equal(videos[1].transition.in, 'slideLeft');
+  const topo = trilhas.find(c=>c.asset.type==='image'); assert.deepEqual(topo.crop, {bottom:0.5});
+  assert(json.includes('CARV') && json.includes('class=\\"d\\"'), 'destaque entra como camada própria');
+  assert(json.includes('class=\\"caixa\\"'), 'legenda em pílula');
+  const legendas = trilhas.filter(c=>c.asset.type==='html5' && c.asset.html.includes('caixa'));
+  assert(legendas.every(l => !p.destaques.some(d => l.start < d.inicio + d.duracao && l.start + l.length > d.inicio)), 'a legenda sai da frente do destaque');
+});

@@ -26,7 +26,7 @@ Referências: [Groq Speech to Text](https://console.groq.com/docs/speech-to-text
 
 - Entrada de 1 segundo a 5 minutos. O limite de armazenamento é 25 MB; o navegador tenta preparar arquivos maiores ou de outros formatos para MP4. A conversão depende do suporte do navegador ao codec original.
 - Saída vertical 9:16, H.264/MP4, 1080p, até 60 segundos.
-- Três estilos: clean, dinâmico e comercial. Cortes cronológicos, legendas com destaque por palavra, correções de palavras pelo chat, zoom suave, título inicial, chamada final e imagens de apoio do banco da própria organização.
+- Três estilos: clean, dinâmico e comercial. Recursos de edição de retenção (padrão dos Reels de especialista): cortes com gancho e ritmo, **palavra-chave em destaque gigante** na cor da marca, legendas com destaque por palavra ou **em pílula**, zoom suave, **transições** (suave, zoom, deslizar), **cor vibrante**, imagens de apoio do banco em **tela cheia, na metade de cima ou em janela**, título inicial e chamada final. O editor tem comandos prontos, incluindo "Entrega acima da média", que pede tudo isso de uma vez. Ícones e emojis não entram, porque o renderizador não garante a fonte.
 - A fala original é preservada. Esta versão não gera músicas, dublagens, imagens novas, substituição de rostos ou efeitos livres. O plano mostra avisos quando um pedido não puder ser atendido.
 - A transcrição é reaproveitada nas conversas seguintes. Prévia e ajustes não descontam exportações.
 - **5 exportações por organização por mês**, renovadas à meia-noite de Brasília no início do mês. Tentativas em processamento reservam uma posição para impedir que chamadas paralelas ultrapassem o limite. Repetir a mesma versão já finalizada retorna o arquivo existente.
