@@ -1,0 +1,2 @@
+modnet-quantizado.onnx: MODNet (ZHKKKe/MODNet), conversão ONNX quantizada do Xenova/modnet, licença Apache-2.0.
+Separa a pessoa do fundo em cada quadro (src/fundo-video.js). Entrada [1,3,H,W] normalizada para -1..1; saída [1,1,H,W] de 0 a 1.

@@ -71,7 +71,8 @@ const erro400 = msg => Object.assign(new Error(msg), { status: 400 });
 async function examinar(arq) {
   const info = await rodar(["-hide_banner", "-i", arq], 30000).catch(e => e.saida || e.message);
   const m = /Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/.exec(info);
-  return { duracao: m ? +m[1] * 3600 + +m[2] * 60 + +m[3] : 0, video: /Stream #.*Video:/.test(info), audio: /Stream #.*Audio:/.test(info) };
+  const t = /Stream #.*Video:.*?(\d{2,5})x(\d{2,5})/.exec(info);
+  return { duracao: m ? +m[1] * 3600 + +m[2] * 60 + +m[3] : 0, video: /Stream #.*Video:/.test(info), audio: /Stream #.*Audio:/.test(info), largura: t ? +t[1] : 0, altura: t ? +t[2] : 0 };
 }
 // bitrate para caber em ~23 MB (com folga para o áudio e o contêiner); vídeos longos saem em 720p
 const qualidade = dur => { const kbps = Math.max(450, Math.min(6000, Math.floor((23 * 8 * 1024) / dur) - 140)); return { kbps, lado: kbps < 1600 ? 720 : 1080 }; };
@@ -131,6 +132,53 @@ export function juntarVideos(arquivos, { maxSegundos = 300 } = {}) {
         "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", "-max_muxing_queue_size", "4096", saida], 20 * 60000);
       let ini = 0; const partes = infos.map(i => { const p = { inicio: +ini.toFixed(3), fim: +(ini + i.duracao).toFixed(3) }; ini += i.duracao; return p; });
       return { ...(await finalizar(saida, pasta, total)), partes };
+    } finally { await fs.rm(pasta, { recursive: true, force: true }); }
+  });
+}
+
+// Luz e cor (Sinsalabim): brilho, contraste e saturação de -50 a 50, temperatura de -50 (fria) a 50 (quente) e vinheta.
+const LUZ_NEUTRA = { brilho: 0, contraste: 0, saturacao: 0, temperatura: 0, vinheta: false };
+export const luzNeutra = l => !l || Object.keys(LUZ_NEUTRA).every(k => !l[k]);
+export function filtrosLuz(l) {
+  if (luzNeutra(l)) return "";
+  const n = (v, a, b) => Math.max(a, Math.min(b, Number(v) || 0));
+  const f = [`eq=brightness=${(n(l.brilho, -50, 50) / 100 * 0.3).toFixed(3)}:contrast=${(1 + n(l.contraste, -50, 50) / 100 * 0.6).toFixed(3)}:saturation=${(1 + n(l.saturacao, -50, 50) / 100).toFixed(3)}`];
+  if (n(l.temperatura, -50, 50)) f.push(`colortemperature=temperature=${Math.round(6500 - n(l.temperatura, -50, 50) * 50)}:mix=0.8`);
+  if (l.vinheta) f.push("vignette=angle=PI/4.5");
+  return f.join(",");
+}
+export function aplicarLuzVideo(arq, luz) {
+  return umPorVez(async () => {
+    const path = await import("node:path"), pasta = await fs.mkdtemp(path.join(os.tmpdir(), "luz-"));
+    try {
+      const info = await examinar(arq), saida = path.join(pasta, "luz.mp4"), { kbps } = qualidade(info.duracao);
+      await rodar(["-hide_banner", "-y", "-i", arq, "-map", "0:v:0", ...(info.audio ? ["-map", "0:a:0", "-c:a", "copy"] : []), "-vf", filtrosLuz(luz) + ",format=yuv420p", ...codificacao(kbps), "-movflags", "+faststart", saida], 20 * 60000);
+      return await finalizar(saida, pasta, info.duracao);
+    } finally { await fs.rm(pasta, { recursive: true, force: true }); }
+  });
+}
+// Troca o fundo atrás da pessoa: "desfoque" desfoca o próprio cenário; "imagem" põe a foto (caminho) no lugar.
+// faixas: [[inicio, fim], ...] em segundos do original; fora delas o quadro fica como estava.
+export function trocarFundoVideo(arq, { tipo, imagem = null, faixas = null, aoAvancar = () => {} }) {
+  return umPorVez(async () => {
+    const path = await import("node:path"), { mascaraDoVideo } = await import("./segmentacao.js");
+    const pasta = await fs.mkdtemp(path.join(os.tmpdir(), "fundo-"));
+    try {
+      const info = await examinar(arq);
+      if (!info.video || !info.duracao || !info.largura) throw erro400("Não consegui abrir este vídeo para trocar o fundo.");
+      const w = info.largura - (info.largura % 2), h = info.altura - (info.altura % 2), mascara = path.join(pasta, "mascara.mp4"), saida = path.join(pasta, "fundo.mp4");
+      await mascaraDoVideo(arq, mascara, { largura: w, altura: h, duracao: info.duracao, faixas, aoAvancar: f => aoAvancar(f * 0.8) });
+      const { kbps } = qualidade(info.duracao);
+      // Borda da máscara um pouco desfocada e endurecida: corta o halo sem serrilhar o cabelo.
+      const m = `scale=${w}:${h}:flags=bicubic,fps=30,format=gray,gblur=sigma=2.2,lutyuv=y='clip((val-38)*1.45,0,255)'`;
+      const entradas = tipo === "imagem" ? ["-i", arq, "-loop", "1", "-i", imagem, "-i", mascara] : ["-i", arq, "-i", mascara];
+      const filtro = tipo === "imagem"
+        ? `[0:v]scale=${w}:${h},fps=30,format=yuva420p[fg];[2:v]${m}[m];[fg][m]alphamerge[p];[1:v]scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h},gblur=sigma=1.2,format=yuv420p[bg];[bg][p]overlay=0:0:shortest=1,format=yuv420p[v]`
+        : `[0:v]scale=${w}:${h},fps=30,split[a][b];[a]format=yuva420p[fg];[1:v]${m}[m];[fg][m]alphamerge[p];[b]scale=${Math.round(w / 4)}:-2,gblur=sigma=5,scale=${w}:${h},format=yuv420p[bg];[bg][p]overlay=0:0:shortest=1,format=yuv420p[v]`;
+      await rodar(["-hide_banner", "-y", ...entradas, "-filter_complex", filtro, "-map", "[v]", ...(info.audio ? ["-map", "0:a:0", "-c:a", "copy"] : []),
+        "-t", info.duracao.toFixed(3), ...codificacao(kbps), "-movflags", "+faststart", "-max_muxing_queue_size", "4096", saida], 30 * 60000);
+      aoAvancar(0.97);
+      return await finalizar(saida, pasta, info.duracao);
     } finally { await fs.rm(pasta, { recursive: true, force: true }); }
   });
 }

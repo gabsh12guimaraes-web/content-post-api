@@ -31,6 +31,12 @@ export function estiloSinsa(r = {}, anterior = {}) {
     tamanhoLegenda: escolha(r.tamanhoLegenda, tamanhos, escolha(anterior.tamanhoLegenda, tamanhos, 'm')),
   };
 }
+// Luz e cor do vídeo: de -50 a 50 (temperatura: negativo esfria, positivo esquenta) e vinheta. Sem pedido, fica a anterior.
+export function luzSinsa(v, anterior) {
+  const b = v && typeof v === 'object' && !Array.isArray(v) ? v : (anterior || {});
+  const n = x => Number.isFinite(Number(x)) ? Math.round(Math.max(-50, Math.min(50, Number(x)))) : 0;
+  return { brilho: n(b.brilho), contraste: n(b.contraste), saturacao: n(b.saturacao), temperatura: n(b.temperatura), vinheta: b.vinheta === true };
+}
 function apoiosValidos(lista, total, banco, max) {
   const imagens = new Set(banco.map(b => b.id)), saida = [];
   const pedidos = (Array.isArray(lista) ? lista : []).filter(a => a && imagens.has(a.banco)).map(a => {
@@ -87,7 +93,7 @@ export function limparPlanoSinsa(r, duracao, banco = [], palavras = []) {
   const cor=/^#[0-9a-f]{6}$/i.test(r.cor || '')?r.cor:'#ff5478';
   const apoios=apoiosValidos(r.apoios,total,banco,3);
   const legendaEstilo=LEGENDAS_SINSA.includes(r.legendaEstilo)?r.legendaEstilo:'captions';
-  const p={titulo:str(r.titulo,100)||'Meu vídeo',resumo:str(r.resumo,600),estilo:ESTILOS_SINSA.includes(r.estilo)?r.estilo:'dinamico',cor,cortes,legendas:r.legendas!==false,tituloTela:str(r.tituloTela,60),chamada:str(r.chamada,60),legenda:str(r.legenda,1600),hashtags:str(r.hashtags,500),apoios,visual:r.visual==='vibrante'?'vibrante':'natural',legendaEstilo,...estiloSinsa(r),avisos:(Array.isArray(r.avisos)?r.avisos:[]).map(a=>str(a,180)).filter(Boolean).slice(0,4)};
+  const p={titulo:str(r.titulo,100)||'Meu vídeo',resumo:str(r.resumo,600),estilo:ESTILOS_SINSA.includes(r.estilo)?r.estilo:'dinamico',cor,cortes,legendas:r.legendas!==false,tituloTela:str(r.tituloTela,60),chamada:str(r.chamada,60),legenda:str(r.legenda,1600),hashtags:str(r.hashtags,500),apoios,visual:r.visual==='vibrante'?'vibrante':'natural',legendaEstilo,...estiloSinsa(r),luz:luzSinsa(r.luz),avisos:(Array.isArray(r.avisos)?r.avisos:[]).map(a=>str(a,180)).filter(Boolean).slice(0,4)};
   p.correcoes=(Array.isArray(r.correcoes)?r.correcoes:[]).slice(0,50).filter(c=>Number.isInteger(c.indice)&&c.indice>=0&&c.indice<palavras.length&&str(c.texto,70)).map(c=>({indice:c.indice,texto:str(c.texto,70)}));
   const corrigidas=new Map(p.correcoes.map(c=>[c.indice,c.texto]));
   p.palavras=[];let offset=0;const naSaida=new Map();
@@ -130,6 +136,7 @@ export function personalizarPlanoSinsa(plano, m = {}, banco = []) {
     p.destaques = m.destaques.slice(0, 12).map(d => { const k = d && d.indice, o = (plano.destaques || [])[k]; if (!o || vistos.has(k) || !str(d.texto, 28)) return null; vistos.add(k); return { ...o, texto: str(d.texto, 28), apoio: typeof d.apoio === 'string' ? str(d.apoio, 60) : o.apoio }; }).filter(Boolean).sort((a, b) => a.inicio - b.inicio);
   }
   if (Array.isArray(m.apoios)) p.apoios = apoiosValidos(m.apoios, p.duracao, banco, 6);
+  if (m.luz && typeof m.luz === 'object') p.luz = luzSinsa(m.luz);
   return p;
 }
 // Legenda curta: até 3 palavras (ou 1 no estilo "unica"), quebrando em pausa ou fim de frase.

@@ -33,7 +33,7 @@ globalThis.fetch=async(url,op={})=>{
   analises++;const req=JSON.parse(op.body);assert(req.system.includes('Sinsalabim'));assert.equal(req.model,'claude-opus-5-5','usa o modelo padrão da plataforma');assert.equal(op.headers['x-api-key'] && op.headers['anthropic-version'],'2023-06-01');assert(req.max_tokens>=16000);const conteudo=req.messages[0].content;assert(conteudo.some(c=>c.type==='image'),'manda quadros do vídeo');assert(conteudo.some(c=>c.type==='text'&&c.text.includes('transcricao')),'manda a transcrição');return Response.json({content:[{type:'text',text:JSON.stringify(planoBase)}],usage:{input_tokens:300,output_tokens:200},stop_reason:'end_turn'});
  }
  if(/^https:\/\/api.shotstack.io\/edit\/(v1|stage)\/render$/.test(u)){
-  renders++;assert.equal(op.headers['x-api-key'],u.includes('/stage/')?'shotstack-sandbox-teste':'shotstack-somente-teste');const t=JSON.parse(op.body);assert.equal(t.output.aspectRatio,'9:16');assert(t.timeline.tracks.some(t=>t.clips.some(c=>c.asset.type==='html5')));
+  renders++;globalThis.ultimoRender=JSON.parse(op.body);assert.equal(op.headers['x-api-key'],u.includes('/stage/')?'shotstack-sandbox-teste':'shotstack-somente-teste');const t=JSON.parse(op.body);assert.equal(t.output.aspectRatio,'9:16');assert(t.timeline.tracks.some(t=>t.clips.some(c=>c.asset.type==='html5')));
   if(incerto)throw new Error('timeout');if(recusar)return Response.json({message:'chave-secreta-nao-repetir'},{status:400});
   return Response.json({response:{id:'render-'+renders}});
  }
@@ -207,4 +207,34 @@ test('personalizar pela API gera nova versão, confere a versão e respeita a or
   assert.equal(ok.status,200,ok.erro); assert.equal(ok.edicao.versao,e.versao+1); assert.equal(ok.edicao.plano.fonteLegenda,'redonda'); assert.equal(ok.edicao.plano.cor,'#123abc');
   assert.equal((await api({acao:'personalizarSinsalabim',id:e.id,versao:e.versao,mudancas:{cor:'#000000'}},token)).status,409,'versão antiga não sobrescreve');
   assert.equal((await api({acao:'personalizarSinsalabim',id:e.id,versao:ok.edicao.versao,mudancas:{}},b.token)).status,404);
+});
+
+test('fundo e luz: troca o fundo no servidor, bloqueia exportar enquanto processa e usa o vídeo tratado no render', async () => {
+  let e = (await api({acao:'obterSinsalabim',id:edicao},token)).edicao;
+  const original = e.arquivo.url;
+  assert.equal((await api({acao:'personalizarSinsalabim',id:e.id,versao:e.versao,mudancas:{fundo:{tipo:'imagem',banco:'nao-existe'}}},token)).status,400);
+  const r = await api({acao:'personalizarSinsalabim',id:e.id,versao:e.versao,mudancas:{fundo:{tipo:'desfoque'},luz:{brilho:20,temperatura:30,vinheta:true,contraste:999}}},token);
+  assert.equal(r.status,200,r.erro); assert.equal(r.edicao.fundo.status,'processando'); assert.equal(r.edicao.fundo.pedido,undefined,'o pedido interno não vai ao navegador');
+  assert.deepEqual(r.edicao.plano.luz,{brilho:20,contraste:50,saturacao:0,temperatura:30,vinheta:true});
+  assert.equal((await api({acao:'exportarSinsalabim',id:e.id,versao:r.edicao.versao,pedido:crypto.randomUUID(),confirmado:true},token)).status,409,'espera o fundo');
+  e = (await esperar(async()=>{const x=await api({acao:'obterSinsalabim',id:edicao},token);return ['pronto','erro'].includes(x.edicao?.fundo?.status)&&x;})).edicao;
+  assert.equal(e.fundo.status,'pronto',e.fundo.erro||''); assert.match(e.fundo.arquivo.url,/\/f\//); assert.notEqual(e.fundo.arquivo.url,original);
+  await db().query('delete from sinsalabim_exportacoes where org_id=$1',[org]);
+  const x = await api({acao:'exportarSinsalabim',id:e.id,versao:e.versao,pedido:crypto.randomUUID(),confirmado:true},token);
+  assert.equal(x.status,200,x.erro);
+  await esperar(async()=>(await db().query('select status from sinsalabim_exportacoes where id=$1',[x.id])).rows[0].status!=='pendente'&&(await db().query('select status from sinsalabim_exportacoes where id=$1',[x.id])).rows[0].status!=='enviando');
+  const fonte = globalThis.ultimoRender.timeline.tracks.at(-1).clips[0].asset.src;
+  assert.notEqual(fonte,original,'o render usa o vídeo com fundo e luz'); assert.notEqual(fonte,e.fundo.arquivo.url,'com luz ajustada, sai uma cópia corrigida');
+  // Voltar ao original não cria tarefa e libera o cenário gravado.
+  await db().query("update sinsalabim_exportacoes set status='erro' where org_id=$1 and status in ('renderizando','salvando')",[org]);
+  const v = (await api({acao:'obterSinsalabim',id:edicao},token)).edicao;
+  const o = await api({acao:'personalizarSinsalabim',id:v.id,versao:v.versao,mudancas:{fundo:{tipo:'original'}}},token);
+  assert.equal(o.edicao.fundo.tipo,'original'); assert.equal(o.edicao.fundo.arquivo,null);
+});
+test('renomear o projeto de vídeo', async () => {
+  const r = await api({acao:'renomearSinsalabim',id:edicao,nome:'  Campanha de outubro  '},token);
+  assert.equal(r.status,200); assert.equal(r.nome,'Campanha de outubro');
+  assert.equal((await api({acao:'listarSinsalabim'},token)).edicoes.find(x=>x.id===edicao).nome,'Campanha de outubro');
+  assert.equal((await api({acao:'renomearSinsalabim',id:edicao,nome:''},token)).status,400);
+  assert.equal((await api({acao:'renomearSinsalabim',id:edicao,nome:'Outro'},b.token)).status,404);
 });

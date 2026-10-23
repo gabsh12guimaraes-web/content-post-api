@@ -12,7 +12,8 @@
     "dev": "node --watch src/servidor.js",
     "migrar": "node src/migrar.js",
     "importar-airtable": "node scripts/importar-airtable.js",
-    "test": "node --test --test-concurrency=1 \"testes/*.test.js\""
+    "test": "node --test --test-concurrency=1 \"testes/*.test.js\"",
+    "postinstall": "node scripts/podar-onnx.js"
   },
   "dependencies": {
     "@fastify/compress": "8.1.0",
@@ -20,6 +21,7 @@
     "fastify": "5.4.0",
     "ffmpeg-static": "^5.2.0",
     "fontkit": "2.0.4",
+    "onnxruntime-node": "1.22.0",
     "pg": "8.16.3",
     "sharp": "0.34.3"
   },
