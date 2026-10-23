@@ -6,7 +6,7 @@ import { registrar, enfileirar, puxar } from './tarefas/fila.js';
 import { quadrosDoVideo, juntarVideos } from './video.js';
 import { situacao, cobrancaLigada, inicioDoMes, usar } from './planos.js';
 import { ehAdmin } from './admin.js';
-import { ESTILOS_SINSA, limparPlanoSinsa, timelineSinsa } from './sinsalabim-plano.js';
+import { ESTILOS_SINSA, limparPlanoSinsa, timelineSinsa, estiloSinsa, personalizarPlanoSinsa } from './sinsalabim-plano.js';
 import { sinsaConfigurado, ambienteSinsa, examinarSinsa, transcreverSinsa, miniaturaSinsa, enviarRenderSinsa, consultarRenderSinsa, baixarRenderSinsa } from './sinsalabim-provedores.js';
 
 const ATIVOS=['pendente','enviando','renderizando','salvando'];
@@ -39,8 +39,8 @@ export async function cotaSinsa(org,q=db()) {
 }
 // Só fotos enviadas pela marca ou do acervo: artes geradas para posts (com texto) não servem de apoio no vídeo.
 const SQL_BANCO="select b.id,b.nome,b.descricao,a.id arquivo_id,a.chave,a.tipo from banco_imagens b join arquivos a on a.id=b.arquivo_id where b.org_id=$1 and b.origem in ('envio','acervo') and a.tipo in ('image/jpeg','image/png','image/webp') order by (b.origem='envio') desc,b.criado_em desc limit 30";
-async function bancoDaOrg(org) {
-  const rows=(await db().query(SQL_BANCO,[org])).rows;
+async function bancoDaOrg(org,q=db()) {
+  const rows=(await q.query(SQL_BANCO,[org])).rows;
   return rows.map(r=>({id:r.id,nome:r.nome,descricao:r.descricao,url:urlArquivo({id:r.arquivo_id,chave:r.chave})}));
 }
 async function miniaturasBanco(org,banco) {
@@ -102,6 +102,19 @@ export const acoesSinsalabim={
       if((await tx.query('select 1 from sinsalabim_exportacoes where edicao_id=$1 and status=any($2::text[])',[e.id,ATIVOS])).rows.length)falha('Aguarde a exportação terminar antes de ajustar o vídeo.',409);
       await enfileirar(ctx.org,'sinsalabimAnalise',{edicao:e.id},ctx.usuario.id,tx);
     });setImmediate(()=>puxar().catch(()=>{}));return {};
+  },
+  // Fonte, estilo, textos, destaques e imagens de apoio escolhidos à mão: muda o plano na hora, sem IA, e gera uma nova versão.
+  async personalizarSinsalabim(ctx,b) {
+    await acesso(ctx);const m=b.mudancas&&typeof b.mudancas==='object'&&!Array.isArray(b.mudancas)?b.mudancas:{};
+    const id=await db().transacao(async tx=>{
+      const e=(await tx.query('select * from sinsalabim_edicoes where id=$1 and org_id=$2 for update',[exigirId(b.id),ctx.org])).rows[0];if(!e)falha('Edição não encontrada.',404);
+      if(!e.plano||e.status==='analisando')falha('Aguarde a prévia ficar pronta.',409);
+      if(Number(b.versao)!==e.versao)falha('A edição mudou enquanto você personalizava. Confira a prévia e tente de novo.',409);
+      if((await tx.query('select 1 from sinsalabim_exportacoes where edicao_id=$1 and status=any($2::text[])',[e.id,ATIVOS])).rows.length)falha('Aguarde a exportação terminar antes de mudar o vídeo.',409);
+      const plano=personalizarPlanoSinsa(e.plano,m,await bancoDaOrg(ctx.org,tx));
+      await tx.query('update sinsalabim_edicoes set plano=$2,versao=versao+1,estilo=$3,atualizado_em=now() where id=$1',[e.id,JSON.stringify(plano),plano.estilo]);return e.id;
+    });
+    return {edicao:await detalhes(await edicaoDaOrg(ctx.org,id)),cota:await cotaSinsa(ctx.org)};
   },
   async exportarSinsalabim(ctx,b) {
     if(b.confirmado!==true)falha('Confirme a exportação antes de continuar.');await exigirProvedores(ctx);
@@ -191,6 +204,7 @@ Padrão de entrega acima da média (use quando o pedido não disser o contrário
 
 Se vierem "partes", o vídeo é a sequência de vários vídeos da pessoa, já unidos nesta ordem (inicio e fim de cada um em segundos): conte uma história contínua aproveitando o melhor de cada parte, sem pular de volta no tempo, e use "suave" na entrada de cada parte nova. Se não houver motivo para encurtar, use um trecho contínuo de até 60 s. Se não houver fala ou não for pedida legenda, use legendas false e destaques vazio. Para corrigir palavras da transcrição quando pedido, inclua correcoes:[{indice:0,texto:"correção"}]; preserve as correções anteriores se não houver pedido para desfazê-las. Não prometa dublagem, troca de rostos, música, emojis/figurinhas, limpeza avançada de ruído, gerar imagens ou vídeos novos ou efeitos fora desta lista; registre em avisos o que não pôde ser feito. Títulos e legenda refletem o conteúdo e a marca, sem inventar fatos. No resumo, diga em uma ou duas frases o que fez nesta versão.`,content:[...imagens,{type:'text',text:JSON.stringify({marca:m,duracao:Number(e.duracao),estilo:e.estilo,...(Array.isArray(e.partes)&&e.partes.length>1?{partes:e.partes.map(p=>({ordem:p.ordem,nome:p.nome,inicio:p.inicio,fim:p.fim}))}:{}),transcricao,conversa:e.mensagens.slice(-10),anterior:e.plano,banco:banco.map(({id,nome,descricao})=>({id,nome,descricao}))})},...vistas]}));
   const plano=limparPlanoSinsa({...r,correcoes:Array.isArray(r.correcoes)?r.correcoes:e.plano?.correcoes},Number(e.duracao),banco,transcricao.palavras);
+  Object.assign(plano,estiloSinsa(r,e.plano||{}));
   await db().query("update sinsalabim_edicoes set plano=$2,versao=versao+1,status='pronto',erro=null,estilo=$3,mensagens=mensagens || $4::jsonb,atualizado_em=now() where id=$1",[e.id,JSON.stringify(plano),plano.estilo,JSON.stringify([{papel:'assistente',texto:plano.resumo||'Preparei uma nova versão para você conferir na prévia.'}])]);return {};
 }
 

@@ -18,7 +18,7 @@ const {conectar,db,desconectar}=await import('../src/db.js');
 const {criarApp}=await import('../src/app.js');
 const {cifrar}=await import('../src/cripto.js');
 const {processarSinsalabim,cotaSinsa}=await import('../src/sinsalabim.js');
-const {limparPlanoSinsa,timelineSinsa,gruposLegendas}=await import('../src/sinsalabim-plano.js');
+const {limparPlanoSinsa,timelineSinsa,gruposLegendas,personalizarPlanoSinsa}=await import('../src/sinsalabim-plano.js');
 await conectar();const app=await criarApp();const originalFetch=globalThis.fetch;
 let claudeFalhas=0,transcricoes=0,renders=0,analises=0,recusar=false,falhaRender=false,incerto=false;
 const planoBase={titulo:'Um conteúdo que conecta',resumo:'Cortei a pausa e destaquei as palavras.',estilo:'dinamico',cor:'#ff5478',cortes:[{inicio:0,fim:1.9,zoom:true}],legendas:true,tituloTela:'Uma boa ideia',chamada:'Conheça a marca',legenda:'Conteúdo feito com cuidado.',hashtags:'#marca',apoios:[],avisos:[]};
@@ -131,11 +131,11 @@ test('edição estilo Captions: tira pausas, zoom fixo alternado, legenda curta 
   const p = limparPlanoSinsa({...planoBase, visual:'vibrante', legendaEstilo:'palavra',
     cortes:[{inicio:0,fim:5,transicao:'zoom'},{inicio:5.5,fim:9,transicao:'deslizar'}],
     destaques:[{indice:1,texto:'Carvão',apoio:'não clareia'},{indice:2},{indice:4},{indice:99}],
-    apoios:[{banco:'img-1',inicio:0.5,duracao:9,layout:'girar'},{banco:'img-1',inicio:2,duracao:3,layout:'tela'},{banco:'de-fora',inicio:0,duracao:1}]}, 9, banco, palavras);
+    apoios:[{banco:'img-1',inicio:0.2,duracao:2,layout:'girar'},{banco:'img-1',inicio:2.5,duracao:3,layout:'tela'},{banco:'de-fora',inicio:0,duracao:1}]}, 9, banco, palavras);
   // A pausa vira um salto: 0 a 1.58 e 3.98 a 5 (zoom alternado); "deslizar" antigo vira entrada suave.
   assert.deepEqual(p.cortes.map(c=>[c.inicio,c.fim,c.zoom,c.transicao]), [[0,1.58,true,'corte'],[3.98,5,false,'corte'],[5.5,6.48,false,'suave'],[7.38,9,true,'corte']]);
   assert.equal(p.legendaEstilo,'captions','estilo desconhecido ou antigo vira o padrão');
-  assert.deepEqual(p.apoios.map(a=>[a.layout,a.duracao]), [['topo',3],['tela',1.5]], 'tela cheia no máximo 1,5 s');
+  assert.deepEqual(p.apoios.map(a=>[a.layout,a.duracao]), [['topo',2],['tela',1.5]], 'tela cheia no máximo 1,5 s');
   assert.deepEqual(p.destaques.map(d=>d.texto), ['Carvão','esmalte'], '"mancha" encosta no destaque anterior e cai');
   const grupos = gruposLegendas(p).map(g=>g.map(w=>w.texto).join(' '));
   assert(grupos.every(g=>g.split(' ').length<=3)); assert(grupos.includes('Viu só?'));
@@ -161,7 +161,7 @@ test('vários vídeos viram uma sequência na ordem, com as partes marcadas para
   assert.equal((await api({acao:'criarSinsalabim',pedido:crypto.randomUUID(),bancos:[v1.id,v1.id],mensagem:'Junte os vídeos numa sequência.'},token)).status,400,'vídeo repetido');
   const r = await api({acao:'criarSinsalabim',pedido:crypto.randomUUID(),bancos:[v1.id,v2.id],mensagem:'Junte os vídeos numa sequência.'},token);
   assert.equal(r.status,200,r.erro);
-  const e = (await esperar(async()=>{const x=await api({acao:'obterSinsalabim',id:r.id},token);return ['pronto','erro'].includes(x.edicao?.status)&&x;})).edicao;
+  let ultimo;const e = (await esperar(async()=>{const x=await api({acao:'obterSinsalabim',id:r.id},token);ultimo=x;return ['pronto','erro'].includes(x.edicao?.status)&&x;}).catch(err=>{console.log('ULTIMO',r.status,r.erro,JSON.stringify(ultimo).slice(0,300));throw err;})).edicao;
   assert.equal(e.status,'pronto',e.erro||'');
   assert.equal(e.partes.length,2); assert.deepEqual(e.partes.map(p=>p.nome),['Abertura','Produto']);
   assert.equal(e.partes[0].inicio,0); assert(Math.abs(e.partes[1].inicio-e.partes[0].fim)<0.01,'a segunda parte começa onde a primeira termina');
@@ -179,4 +179,32 @@ test('análise tenta de novo quando o Claude está sobrecarregado e mostra a eta
  claudeFalhas=1;const ok=await criar();assert.equal(ok.status,'pronto',ok.erro||'');assert.equal(claudeFalhas,0);
  claudeFalhas=2;const ruim=await criar();assert.equal(ruim.status,'erro');
  assert.match(ruim.erro,/A IA não conseguiu montar a edição agora\. Motivo: falha na API do Claude: Overloaded\./);
+});
+
+test('personalização à mão: fontes, posição, destaques e imagens com fade, só com o que é válido', () => {
+  const palavras = [{texto:'Olha',inicio:0.1,fim:0.4},{texto:'esse',inicio:0.5,fim:0.8},{texto:'produto',inicio:0.9,fim:1.4},{texto:'que',inicio:1.5,fim:1.7},{texto:'muda',inicio:1.8,fim:2.1},{texto:'tudo',inicio:2.2,fim:2.6}];
+  const banco = [{id:'img-1',url:'https://api.example.com/f/1/k'},{id:'img-2',url:'https://api.example.com/f/2/k'}];
+  const base = limparPlanoSinsa({...planoBase,tirarPausas:false,cortes:[{inicio:0,fim:8}],destaques:[{indice:2},{indice:5}]}, 8, banco, palavras);
+  assert.equal(base.fonteLegenda,'forte'); assert.equal(base.fonteDestaque,'cursiva'); assert.equal(base.destaques.length,2);
+  const p = personalizarPlanoSinsa(base, {fonteLegenda:'condensada',fonteDestaque:'elegante',posicaoLegenda:'alto',tamanhoLegenda:'g',cor:'#22c55e',legendaEstilo:'pilula',tituloTela:'  Novo título  ',
+    destaques:[{indice:1,texto:'Tudo!',apoio:'muda'},{indice:1,texto:'repetido'},{indice:7,texto:'não existe'}],
+    apoios:[{banco:'img-2',inicio:3,duracao:2.5,layout:'janela'},{banco:'img-1',inicio:0.5,duracao:1.5,layout:'tela'},{banco:'img-1',inicio:3.5,duracao:1},{banco:'de-fora',inicio:6,duracao:1}]}, banco);
+  assert.deepEqual([p.fonteLegenda,p.fonteDestaque,p.posicaoLegenda,p.tamanhoLegenda,p.cor,p.legendaEstilo,p.tituloTela],['condensada','elegante','alto','g','#22c55e','pilula','Novo título']);
+  assert.deepEqual(p.destaques.map(d=>[d.texto,d.apoio,d.inicio]), [['Tudo!','muda',base.destaques[1].inicio]], 'tira o primeiro, edita o segundo e mantém o momento da fala');
+  assert.deepEqual(p.apoios.map(a=>[a.banco,a.inicio,a.layout]), [['img-1',0.5,'tela'],['img-2',3,'janela']], 'imagem sobreposta e de fora da organização saem');
+  assert.deepEqual(p.cortes, base.cortes); assert.deepEqual(p.palavras, base.palavras);
+  const ignorado = personalizarPlanoSinsa(p, {fonteLegenda:'comic-sans',cor:'vermelho',legendaEstilo:'neon'}, banco);
+  assert.deepEqual([ignorado.fonteLegenda,ignorado.cor,ignorado.legendaEstilo],['condensada','#22c55e','pilula']);
+  const t = timelineSinsa(p,'https://api.example.com/f/v/k',banco), clips = t.timeline.tracks.flatMap(x=>x.clips), css = clips.find(c=>c.asset.type==='html5').asset.css;
+  assert(css.includes('font-family:SinsaCondensada') && css.includes('font-family:SinsaElegante') && !css.includes('font-family:SinsaScript'), 'embute só as fontes usadas');
+  assert(css.includes('.leg{top:560px'));
+  const imgs = clips.filter(c=>c.asset.type==='image');
+  assert.deepEqual(imgs.map(c=>c.transition), [{in:'fadeFast',out:'fadeFast'},{in:'fade',out:'fade'}], 'imagens entram e saem com fade');
+});
+test('personalizar pela API gera nova versão, confere a versão e respeita a organização', async () => {
+  const e = (await api({acao:'obterSinsalabim',id:edicao},token)).edicao;assert.equal(e.status,'pronto');
+  const ok = await api({acao:'personalizarSinsalabim',id:e.id,versao:e.versao,mudancas:{fonteLegenda:'redonda',cor:'#123abc'}},token);
+  assert.equal(ok.status,200,ok.erro); assert.equal(ok.edicao.versao,e.versao+1); assert.equal(ok.edicao.plano.fonteLegenda,'redonda'); assert.equal(ok.edicao.plano.cor,'#123abc');
+  assert.equal((await api({acao:'personalizarSinsalabim',id:e.id,versao:e.versao,mudancas:{cor:'#000000'}},token)).status,409,'versão antiga não sobrescreve');
+  assert.equal((await api({acao:'personalizarSinsalabim',id:e.id,versao:ok.edicao.versao,mudancas:{}},b.token)).status,404);
 });

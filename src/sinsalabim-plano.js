@@ -8,6 +8,39 @@ export const ESTILOS_SINSA = ['clean', 'dinamico', 'comercial'];
 export const TRANSICOES_SINSA = ['corte', 'suave'];
 export const LAYOUTS_APOIO = ['topo', 'janela', 'tela'];
 export const LEGENDAS_SINSA = ['captions', 'pilula', 'unica'];
+// Estilo que a pessoa escolhe no painel, sem IA. Só as fontes usadas vão embutidas no render (SIL OFL, em src/fontes).
+export const FONTES_SINSA = {
+  forte: { familia: 'SinsaForte', arquivo: 'montserrat-latin.woff2', peso: 900, faixa: '100 900' },
+  condensada: { familia: 'SinsaCondensada', arquivo: 'anton-latin.woff2', peso: 400 },
+  redonda: { familia: 'SinsaRedonda', arquivo: 'poppins-800-latin.woff2', peso: 800 },
+  cursiva: { familia: 'SinsaScript', arquivo: 'pacifico-latin.woff2', peso: 400, manuscrita: true },
+  elegante: { familia: 'SinsaElegante', arquivo: 'playfair-italico-latin.woff2', peso: 800, italico: true, manuscrita: true },
+};
+export const FONTES_LEGENDA = ['forte', 'condensada', 'redonda'];
+export const FONTES_DESTAQUE = ['cursiva', 'elegante', 'forte', 'condensada', 'redonda'];
+export const POSICOES_LEGENDA = { baixo: 1270, meio: 960, alto: 560 };
+export const TAMANHOS_LEGENDA = { p: 0.84, m: 1, g: 1.2 };
+const escolha = (v, lista, pad) => lista.includes(v) ? v : pad;
+// O que vier válido em r vale; senão fica a escolha anterior (um ajuste pela IA não desfaz o estilo escolhido à mão).
+export function estiloSinsa(r = {}, anterior = {}) {
+  const posicoes = Object.keys(POSICOES_LEGENDA), tamanhos = Object.keys(TAMANHOS_LEGENDA);
+  return {
+    fonteLegenda: escolha(r.fonteLegenda, FONTES_LEGENDA, escolha(anterior.fonteLegenda, FONTES_LEGENDA, 'forte')),
+    fonteDestaque: escolha(r.fonteDestaque, FONTES_DESTAQUE, escolha(anterior.fonteDestaque, FONTES_DESTAQUE, 'cursiva')),
+    posicaoLegenda: escolha(r.posicaoLegenda, posicoes, escolha(anterior.posicaoLegenda, posicoes, 'baixo')),
+    tamanhoLegenda: escolha(r.tamanhoLegenda, tamanhos, escolha(anterior.tamanhoLegenda, tamanhos, 'm')),
+  };
+}
+function apoiosValidos(lista, total, banco, max) {
+  const imagens = new Set(banco.map(b => b.id)), saida = [];
+  const pedidos = (Array.isArray(lista) ? lista : []).filter(a => a && imagens.has(a.banco)).map(a => {
+    const layout = LAYOUTS_APOIO.includes(a.layout) ? a.layout : 'topo';
+    return { banco: a.banco, inicio: +num(a.inicio, 0, Math.max(0, total - 0.3)).toFixed(3), duracao: +num(a.duracao, 0.8, layout === 'tela' ? 1.5 : 4, 1.8).toFixed(3), layout };
+  }).filter(a => a.inicio + a.duracao <= total + 0.01).sort((a, b) => a.inicio - b.inicio);
+  // Uma imagem por vez: a que começa antes de a anterior sair fica de fora.
+  for (const a of pedidos) { if (saida.length >= max) break; const ant = saida.at(-1); if (!ant || a.inicio >= ant.inicio + ant.duracao - 0.01) saida.push(a); }
+  return saida;
+}
 const PAUSA = 0.6, RESPIRO_INICIO = 0.12, RESPIRO_FIM = 0.18, MIN_TRECHO = 0.35;
 export const ZOOM_SINSA = 1.12;
 export const duracaoPlano = p => Math.round(p.cortes.reduce((t,c) => t+c.fim-c.inicio,0)*1000)/1000;
@@ -52,10 +85,9 @@ export function limparPlanoSinsa(r, duracao, banco = [], palavras = []) {
   }
   if(!cortes.length)throw new Error('Não encontramos trechos válidos para a edição. Tente explicar seu objetivo de outra forma.');
   const cor=/^#[0-9a-f]{6}$/i.test(r.cor || '')?r.cor:'#ff5478';
-  const imagens=new Set(banco.map(b=>b.id));
-  const apoios=(Array.isArray(r.apoios)?r.apoios:[]).slice(0,3).filter(a=>imagens.has(a.banco)).map(a=>{const layout=LAYOUTS_APOIO.includes(a.layout)?a.layout:'topo';return {banco:a.banco,inicio:num(a.inicio,0,Math.max(0,total-0.3)),duracao:num(a.duracao,0.8,layout==='tela'?1.5:3,1.8),layout};}).filter(a=>a.inicio+a.duracao<=total+0.01);
+  const apoios=apoiosValidos(r.apoios,total,banco,3);
   const legendaEstilo=LEGENDAS_SINSA.includes(r.legendaEstilo)?r.legendaEstilo:'captions';
-  const p={titulo:str(r.titulo,100)||'Meu vídeo',resumo:str(r.resumo,600),estilo:ESTILOS_SINSA.includes(r.estilo)?r.estilo:'dinamico',cor,cortes,legendas:r.legendas!==false,tituloTela:str(r.tituloTela,60),chamada:str(r.chamada,60),legenda:str(r.legenda,1600),hashtags:str(r.hashtags,500),apoios,visual:r.visual==='vibrante'?'vibrante':'natural',legendaEstilo,avisos:(Array.isArray(r.avisos)?r.avisos:[]).map(a=>str(a,180)).filter(Boolean).slice(0,4)};
+  const p={titulo:str(r.titulo,100)||'Meu vídeo',resumo:str(r.resumo,600),estilo:ESTILOS_SINSA.includes(r.estilo)?r.estilo:'dinamico',cor,cortes,legendas:r.legendas!==false,tituloTela:str(r.tituloTela,60),chamada:str(r.chamada,60),legenda:str(r.legenda,1600),hashtags:str(r.hashtags,500),apoios,visual:r.visual==='vibrante'?'vibrante':'natural',legendaEstilo,...estiloSinsa(r),avisos:(Array.isArray(r.avisos)?r.avisos:[]).map(a=>str(a,180)).filter(Boolean).slice(0,4)};
   p.correcoes=(Array.isArray(r.correcoes)?r.correcoes:[]).slice(0,50).filter(c=>Number.isInteger(c.indice)&&c.indice>=0&&c.indice<palavras.length&&str(c.texto,70)).map(c=>({indice:c.indice,texto:str(c.texto,70)}));
   const corrigidas=new Map(p.correcoes.map(c=>[c.indice,c.texto]));
   p.palavras=[];let offset=0;const naSaida=new Map();
@@ -83,6 +115,23 @@ export function limparPlanoSinsa(r, duracao, banco = [], palavras = []) {
   }
   return p;
 }
+// Mudanças feitas à mão no painel: só campos conhecidos, validados como os da IA. Cortes e palavras não mudam aqui.
+export function personalizarPlanoSinsa(plano, m = {}, banco = []) {
+  const p = { ...plano, ...estiloSinsa(m, plano) };
+  if (/^#[0-9a-f]{6}$/i.test(m.cor || '')) p.cor = m.cor;
+  if (LEGENDAS_SINSA.includes(m.legendaEstilo)) p.legendaEstilo = m.legendaEstilo;
+  if (typeof m.legendas === 'boolean') p.legendas = m.legendas;
+  if (m.visual === 'natural' || m.visual === 'vibrante') p.visual = m.visual;
+  if (typeof m.tituloTela === 'string') p.tituloTela = str(m.tituloTela, 60);
+  if (typeof m.chamada === 'string') p.chamada = str(m.chamada, 60);
+  // Destaques: a pessoa só edita o texto ou tira; o momento continua o da fala.
+  if (Array.isArray(m.destaques)) {
+    const vistos = new Set();
+    p.destaques = m.destaques.slice(0, 12).map(d => { const k = d && d.indice, o = (plano.destaques || [])[k]; if (!o || vistos.has(k) || !str(d.texto, 28)) return null; vistos.add(k); return { ...o, texto: str(d.texto, 28), apoio: typeof d.apoio === 'string' ? str(d.apoio, 60) : o.apoio }; }).filter(Boolean).sort((a, b) => a.inicio - b.inicio);
+  }
+  if (Array.isArray(m.apoios)) p.apoios = apoiosValidos(m.apoios, p.duracao, banco, 6);
+  return p;
+}
 // Legenda curta: até 3 palavras (ou 1 no estilo "unica"), quebrando em pausa ou fim de frase.
 export function gruposLegendas(p) {
   const max=p.legendaEstilo==='unica'?1:3,grupos=[];let grupo=[];
@@ -95,9 +144,10 @@ export function gruposLegendas(p) {
 }
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 // O HTML5 do Shotstack bloqueia fontes remotas: as duas vão embutidas (Montserrat e Pacifico, SIL OFL).
-let FONTES;
-const fontes=()=>FONTES??=(()=>{const ler=n=>fs.readFileSync(new URL('./fontes/'+n,import.meta.url)).toString('base64');
-  return `@font-face{font-family:SinsaForte;font-weight:100 900;src:url(data:font/woff2;base64,${ler('montserrat-latin.woff2')}) format('woff2')}@font-face{font-family:SinsaScript;src:url(data:font/woff2;base64,${ler('pacifico-latin.woff2')}) format('woff2')}`;})();
+const ARQUIVOS_FONTE = new Map();
+const lerFonte = n => { if (!ARQUIVOS_FONTE.has(n)) ARQUIVOS_FONTE.set(n, fs.readFileSync(new URL('./fontes/' + n, import.meta.url)).toString('base64')); return ARQUIVOS_FONTE.get(n); };
+// O HTML5 do Shotstack bloqueia fontes remotas: cada fonte usada vai embutida no CSS.
+const fontes = chaves => [...new Set(chaves)].map(k => { const f = FONTES_SINSA[k]; return `@font-face{font-family:${f.familia};font-weight:${f.faixa || f.peso};font-style:${f.italico ? 'italic' : 'normal'};src:url(data:font/woff2;base64,${lerFonte(f.arquivo)}) format('woff2')}`; }).join('');
 const s3=n=>Math.max(0,n).toFixed(3);
 // Aparece só entre inicio e inicio+duracao: fora da animação vale a opacidade 0 da classe .j.
 const janela=(inicio,duracao,extra='')=>`animation:ver ${s3(duracao)}s linear ${s3(inicio)}s 1${extra}`;
@@ -115,16 +165,21 @@ export function camadaTextoSinsa(plano, total=plano.duracao) {
   const t=Math.min(2.6,total/2);
   if(plano.tituloTela)partes.push(`<div class="j card" style="${janela(0,t)}"><div class="pop" style="animation:pop .25s ease-out 0s 1 both">${esc(plano.tituloTela)}</div></div>`);
   if(plano.chamada)partes.push(`<div class="j card" style="${janela(total-t,t)}"><div class="pop" style="animation:pop .25s ease-out ${s3(total-t)}s 1 both">${esc(plano.chamada)}</div></div>`);
+  const fl=plano.fonteLegenda||'forte',fd=plano.fonteDestaque||'cursiva',F=FONTES_SINSA[fl]||FONTES_SINSA.forte,D=FONTES_SINSA[fd]||FONTES_SINSA.cursiva;
+  const fam=f=>`${f.italico?'italic ':''}${f.peso}`,tam=(TAMANHOS_LEGENDA[plano.tamanhoLegenda]||1)*(fl==='condensada'?1.12:1);
+  const tamLeg=Math.round((plano.legendaEstilo==='unica'?104:78)*tam),topo=POSICOES_LEGENDA[plano.posicaoLegenda]||POSICOES_LEGENDA.baixo;
+  // Letra manuscrita fica como foi escrita; as outras vão em maiúsculas, um pouco menores.
+  const destB=D.manuscrita?`font:${fam(D)} ${fd==='elegante'?150:176}px/1.15 ${D.familia},serif;-webkit-text-stroke:5px #fff`:`font:${fam(D)} ${fd==='condensada'?170:140}px/1.05 ${D.familia},sans-serif;text-transform:uppercase;-webkit-text-stroke:10px #000`;
   const ativa=plano.legendaEstilo==='pilula'?`color:#fff;background:${cor};box-shadow:0 6px 0 #0004`:`color:${cor};transform:scale(1.12)`;
-  const css=`${fontes()}html,body{margin:0;width:1080px;height:1920px;background:transparent;overflow:hidden}
+  const css=`${fontes([fl,fd])}html,body{margin:0;width:1080px;height:1920px;background:transparent;overflow:hidden}
 .j{position:absolute;left:60px;right:60px;opacity:0;text-align:center}
 @keyframes ver{from,to{opacity:1}}@keyframes pop{from{opacity:0;transform:scale(.82) translateY(14px)}to{opacity:1;transform:none}}@keyframes surge{from{opacity:0;transform:scale(.5) rotate(-4deg)}to{opacity:1;transform:none}}
 @keyframes acende{from,to{${ativa}}}
-.leg{top:1270px;font:900 ${plano.legendaEstilo==='unica'?104:78}px/1.12 SinsaForte,Arial,sans-serif;text-transform:uppercase;color:#fff;-webkit-text-stroke:12px #000;paint-order:stroke fill;text-shadow:0 7px 0 #0005;letter-spacing:-1px}
+.leg{top:${topo}px;font:${fam(F)} ${tamLeg}px/1.12 ${F.familia},Arial,sans-serif;text-transform:uppercase;color:#fff;-webkit-text-stroke:12px #000;paint-order:stroke fill;text-shadow:0 7px 0 #0005;letter-spacing:-1px}
 .leg .w{display:inline-block;padding:2px 12px;margin:0 -6px;border-radius:14px}
-.dest{top:1000px}.dest small{display:block;font:800 46px/1.1 SinsaForte,Arial,sans-serif;text-transform:uppercase;color:#fff;-webkit-text-stroke:8px #000;paint-order:stroke fill;margin-bottom:-6px}
-.dest b{display:block;font:400 176px/1.15 SinsaScript,cursive;color:${cor};-webkit-text-stroke:5px #fff;paint-order:stroke fill;text-shadow:0 0 26px #fff9,0 10px 0 #0004;white-space:nowrap}
-.card{top:250px}.card .pop{display:inline-block;max-width:900px;padding:22px 34px;border-radius:26px;background:#fff;color:#0b0b0f;font:900 60px/1.12 SinsaForte,Arial,sans-serif;box-shadow:0 14px 40px #0006;border-bottom:10px solid ${cor}}`;
+.dest{top:1000px}.dest small{display:block;font:${fam(F)} 46px/1.1 ${F.familia},Arial,sans-serif;text-transform:uppercase;color:#fff;-webkit-text-stroke:8px #000;paint-order:stroke fill;margin-bottom:-6px}
+.dest b{display:block;${destB};color:${cor};paint-order:stroke fill;text-shadow:0 0 26px #fff9,0 10px 0 #0004;white-space:nowrap}
+.card{top:250px}.card .pop{display:inline-block;max-width:900px;padding:22px 34px;border-radius:26px;background:#fff;color:#0b0b0f;font:${fam(F)} 60px/1.12 ${F.familia},Arial,sans-serif;box-shadow:0 14px 40px #0006;border-bottom:10px solid ${cor}}`;
   return {asset:{type:'html5',html:partes.join(''),css},start:0,length:+total.toFixed(3)};
 }
 export function timelineSinsa(plano, video, imagens=[]) {
@@ -132,7 +187,7 @@ export function timelineSinsa(plano, video, imagens=[]) {
   const videos=plano.cortes.map(c=>{const clip={asset:{type:'video',src:video,trim:c.inicio,volume:1},start:+t.toFixed(3),length:+(c.fim-c.inicio).toFixed(3),fit:'crop',...(c.zoom?{scale:ZOOM_SINSA}:{}),...(plano.visual==='vibrante'?{filter:'boost'}:{}),...(c.transicao==='suave'?{transition:{in:'fadeFast'}}:{})};t+=c.fim-c.inicio;return clip;});
   // Imagem de apoio: cartão no alto (a pessoa segue falando embaixo), janela no canto ou tela cheia por um instante.
   const LAYOUT={topo:{fit:'contain',scale:0.58,position:'top',offset:{y:-0.07}},janela:{fit:'contain',scale:0.36,position:'topRight',offset:{x:-0.05,y:-0.09}},tela:{fit:'crop'}};
-  const apoios=plano.apoios.map(a=>({asset:{type:'image',src:imagens.find(i=>i.id===a.banco)?.url},start:a.inicio,length:a.duracao,...(LAYOUT[a.layout]||LAYOUT.topo),transition:{in:a.layout==='tela'?'fadeFast':'slideDown',out:'fadeFast'}})).filter(a=>a.asset.src);
+  const apoios=plano.apoios.map(a=>({asset:{type:'image',src:imagens.find(i=>i.id===a.banco)?.url},start:a.inicio,length:a.duracao,...(LAYOUT[a.layout]||LAYOUT.topo),transition:a.duracao>=2.4?{in:'fade',out:'fade'}:{in:'fadeFast',out:'fadeFast'}})).filter(a=>a.asset.src);
   const textos=camadaTextoSinsa(plano,t);
   const trilhas=[{clips:textos.asset.html?[textos]:[]},{clips:apoios},{clips:videos}].filter(x=>x.clips.length);
   return {timeline:{background:'#000000',tracks:trilhas},output:{format:'mp4',resolution:'1080',aspectRatio:'9:16',fps:30}};
