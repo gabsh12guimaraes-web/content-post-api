@@ -4,6 +4,7 @@
 // e o Instagram recusa ("had a problem processing this video").
 import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
+import os from "node:os";
 import ffmpeg from "ffmpeg-static";
 
 const rodar = (args, ms = 10 * 60000) => new Promise((ok, falha) => {
@@ -74,7 +75,9 @@ async function examinar(arq) {
 }
 // bitrate para caber em ~23 MB (com folga para o áudio e o contêiner); vídeos longos saem em 720p
 const qualidade = dur => { const kbps = Math.max(450, Math.min(6000, Math.floor((23 * 8 * 1024) / dur) - 140)); return { kbps, lado: kbps < 1600 ? 720 : 1080 }; };
-const codificacao = kbps => ["-c:v", "libx264", "-preset", "veryfast", "-profile:v", "high", "-b:v", kbps + "k", "-maxrate", Math.round(kbps * 1.4) + "k", "-bufsize", kbps * 2 + "k", "-g", "60", "-threads", "0"];
+// Poucas threads: com "0" o x264 abre uma por núcleo da máquina do Railway e a memória estoura em sequências longas.
+const THREADS = String(Math.max(1, Math.min(4, os.availableParallelism ? os.availableParallelism() : os.cpus().length)));
+const codificacao = kbps => ["-c:v", "libx264", "-preset", "veryfast", "-profile:v", "high", "-b:v", kbps + "k", "-maxrate", Math.round(kbps * 1.4) + "k", "-bufsize", kbps * 2 + "k", "-g", "60", "-threads", THREADS];
 async function finalizar(saida, pasta, dur) {
   const mp4 = await fs.readFile(saida);
   if (mp4.length > LIMITE_MP4) throw erro400("Mesmo convertido, o vídeo ficou grande demais. Envie um trecho mais curto.");

@@ -9,7 +9,7 @@ import ffmpeg from 'ffmpeg-static';
 process.env.DATABASE_URL='pglite:memoria';
 process.env.CHAVE_MESTRA=crypto.randomBytes(32).toString('base64');
 process.env.GROQ_API_KEY='groq-somente-teste';process.env.SHOTSTACK_API_KEY='shotstack-somente-teste';
-process.env.URL_PUBLICA='https://api.example.com';
+process.env.URL_PUBLICA='https://api.example.com';process.env.SINSA_ESPERA_MS='5';
 const pasta=await fs.mkdtemp(path.join(os.tmpdir(),'sinsa-test-'));process.env.PASTA_ARQUIVOS=pasta;
 const video=path.join(pasta,'original.mp4');
 execFileSync(ffmpeg,['-hide_banner','-loglevel','error','-f','lavfi','-i','color=c=blue:s=180x320:r=15:d=2','-f','lavfi','-i','sine=frequency=440:duration=2','-shortest','-c:v','libx264','-pix_fmt','yuv420p','-c:a','aac','-y',video]);
@@ -20,7 +20,7 @@ const {cifrar}=await import('../src/cripto.js');
 const {processarSinsalabim,cotaSinsa}=await import('../src/sinsalabim.js');
 const {limparPlanoSinsa,timelineSinsa}=await import('../src/sinsalabim-plano.js');
 await conectar();const app=await criarApp();const originalFetch=globalThis.fetch;
-let transcricoes=0,renders=0,analises=0,recusar=false,falhaRender=false,incerto=false;
+let claudeFalhas=0,transcricoes=0,renders=0,analises=0,recusar=false,falhaRender=false,incerto=false;
 const planoBase={titulo:'Um conteúdo que conecta',resumo:'Cortei a pausa e destaquei as palavras.',estilo:'dinamico',cor:'#ff5478',cortes:[{inicio:0,fim:1.9,zoom:true}],legendas:true,tituloTela:'Uma boa ideia',chamada:'Conheça a marca',legenda:'Conteúdo feito com cuidado.',hashtags:'#marca',apoios:[],avisos:[]};
 globalThis.fetch=async(url,op={})=>{
  const u=String(url);
@@ -29,6 +29,7 @@ globalThis.fetch=async(url,op={})=>{
   return Response.json({text:'Olá mundo, vamos criar.',duration:2,words:[{word:'Olá',start:.1,end:.4},{word:'mundo',start:.5,end:.8},{word:'vamos',start:1,end:1.3},{word:'criar',start:1.4,end:1.8}]});
  }
  if(u==='https://api.anthropic.com/v1/messages'){
+  if(claudeFalhas>0){claudeFalhas--;return Response.json({type:'error',error:{type:'overloaded_error',message:'Overloaded'}},{status:529});}
   analises++;const req=JSON.parse(op.body);assert(req.system.includes('Sinsalabim'));assert.equal(req.model,'claude-opus-5-5','usa o modelo padrão da plataforma');assert.equal(op.headers['x-api-key'] && op.headers['anthropic-version'],'2023-06-01');assert(req.max_tokens>=16000);const conteudo=req.messages[0].content;assert(conteudo.some(c=>c.type==='image'),'manda quadros do vídeo');assert(conteudo.some(c=>c.type==='text'&&c.text.includes('transcricao')),'manda a transcrição');return Response.json({content:[{type:'text',text:JSON.stringify(planoBase)}],usage:{input_tokens:300,output_tokens:200},stop_reason:'end_turn'});
  }
  if(/^https:\/\/api.shotstack.io\/edit\/(v1|stage)\/render$/.test(u)){
@@ -164,4 +165,11 @@ test('vários vídeos viram uma sequência na ordem, com as partes marcadas para
   assert.equal(e.etapa,'planejando');
   const outra = await api({acao:'criarSinsalabim',pedido:crypto.randomUUID(),bancos:[v1.id,v2.id],mensagem:'Quero editar estes vídeos.'},b.token);
   assert.equal(outra.status,404,'outra organização não usa os vídeos');
+});
+
+test('análise tenta de novo quando o Claude está sobrecarregado e mostra a etapa quando falha de vez',async()=>{
+ const criar=async()=>{const r=await api({acao:'criarSinsalabim',pedido:crypto.randomUUID(),banco:banco.id,mensagem:'Corte as pausas.'},token);assert.equal(r.status,200);return (await esperar(async()=>{const x=await api({acao:'obterSinsalabim',id:r.id},token);return ['pronto','erro'].includes(x.edicao?.status)&&x;})).edicao;};
+ claudeFalhas=1;const ok=await criar();assert.equal(ok.status,'pronto',ok.erro||'');assert.equal(claudeFalhas,0);
+ claudeFalhas=2;const ruim=await criar();assert.equal(ruim.status,'erro');
+ assert.match(ruim.erro,/A IA não conseguiu montar a edição agora\. Motivo: falha na API do Claude: Overloaded\./);
 });
