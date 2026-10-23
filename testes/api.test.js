@@ -327,6 +327,15 @@ test("editar textos depois de pronto e ajustar um slide só", async () => {
   assert.equal(s1[0].usa_imagem, true, "mantém os outros campos do slide");
   assert.equal(s1[0].prompt_secreto, undefined, "não aceita campos novos");
   assert.equal(p.Legenda, "Legenda nova");
+  // Mudar só a legenda não obriga a gerar as artes (ou o vídeo) de novo; mudar o texto da arte, sim.
+  await db().query("update posts set artes_prontas = true where id = $1", [p0.id]);
+  const so = await chamar({ acao: "salvarTextos", id: p0.id, slides: s1, legenda: "Só a legenda", hashtags: "#x" }, bob);
+  assert.equal(so.artesProntas, true);
+  assert.equal((await db().query("select artes_prontas from posts where id = $1", [p0.id])).rows[0].artes_prontas, true);
+  s1[0].titulo = "Capa editada de novo";
+  assert.equal((await chamar({ acao: "salvarTextos", id: p0.id, slides: s1, legenda: "Só a legenda", hashtags: "#x" }, bob)).artesProntas, false);
+  assert.equal((await db().query("select artes_prontas from posts where id = $1", [p0.id])).rows[0].artes_prontas, false);
+  s1[0].titulo = "Capa editada"; await chamar({ acao: "salvarTextos", id: p0.id, slides: s1, legenda: "Legenda nova", hashtags: "#x #y" }, bob);
 
   const original = globalThis.fetch, pedidos = [];
   globalThis.fetch = async (url, op = {}) => {
