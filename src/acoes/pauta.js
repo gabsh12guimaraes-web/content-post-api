@@ -282,28 +282,10 @@ export const acoesPauta = {
     return {};
   },
   async enviarImagemBanco(ctx, b) {
-    // .mov do iPhone e outros formatos de vídeo chegam como estão e o servidor converte para MP4 (H.264).
-    // b.bruto (Buffer) só vem da rota /video, com o arquivo inteiro; o JSON não consegue mandar um Buffer.
-    const bruto = Buffer.isBuffer(b.bruto) ? b.bruto : null;
-    if (bruto && !(VIDEOS_PARA_CONVERTER.includes(b.tipo) || b.tipo === "video/mp4")) falha("Envie um vídeo em MP4 ou MOV.");
-    let converter = VIDEOS_PARA_CONVERTER.includes(b.tipo);
+    const converter = VIDEOS_PARA_CONVERTER.includes(b.tipo);
     if (!["image/png", "image/jpeg", "image/webp", "video/mp4"].includes(b.tipo) && !converter) falha("Envie fotos em JPG, PNG ou WEBP, ou vídeos em MP4 ou MOV.");
-    const total = (await db().query("select count(*)::int as n from banco_imagens where org_id = $1 and origem = 'envio'", [ctx.org])).rows[0].n;
-    if (total >= 300) falha("O banco aceita até 300 arquivos enviados. Remova alguns para enviar novos.");
     const video = b.tipo === "video/mp4" || converter;
-    let dados = bruto || doBase64(b.base64, (video ? 60 : 8) * 1024 * 1024), capa = video ? capaDe(b.capa) : undefined;
-    // MP4 acima do limite do volume também é reduzido aqui
-    if (b.tipo === "video/mp4" && dados.length > 25 * 1024 * 1024) converter = true;
-    if (converter) { const c = await converterParaMp4(dados); dados = c.dados; capa = capa || c.capa; }
-    const nomeArquivo = converter ? String(b.nome || "video").replace(/\.[^.]+$/, "") + ".mp4" : b.nome;
-    const arquivo = await salvarArquivo(ctx.org, { tipo: video ? "video/mp4" : b.tipo, nome: nomeArquivo, dados, capa });
-    // já sai no padrão do Instagram: não precisa converter de novo na hora de publicar
-    if (converter) await db().query("update arquivos set padronizado = true where id = $1", [arquivo]);
-    const nome = texto(b.titulo, 80);
-    const { rows } = await db().query("insert into banco_imagens (org_id, arquivo_id, nome) values ($1, $2, $3) returning id", [ctx.org, arquivo, nome]);
-    // A IA descreve a foto em segundo plano (nome, descrição e etiquetas). Se não houver chave do Claude, fica para a pessoa preencher.
-    if (b.descrever !== false && !video) await enfileirar(ctx.org, "descreverImagem", { imagem: rows[0].id }, ctx.usuario.id);
-    return { id: rows[0].id };
+    return guardarEnvioNoBanco(ctx, { ...b, dados: doBase64(b.base64, (video ? 60 : 8) * 1024 * 1024) });
   },
   async salvarImagemBanco(ctx, b) {
     const id = exigirId(b.id);
@@ -675,3 +657,26 @@ export const acoesPauta = {
     return {};
   },
 };
+
+// Guarda um envio no banco. "caminho" (arquivo no disco) só vem da rota /video, nunca de um pedido JSON.
+export async function guardarEnvioNoBanco(ctx, b) {
+  let converter = VIDEOS_PARA_CONVERTER.includes(b.tipo);
+  const video = b.tipo === "video/mp4" || converter;
+  if (b.caminho && !video) falha("Envie um vídeo em MP4 ou MOV.");
+  const total = (await db().query("select count(*)::int as n from banco_imagens where org_id = $1 and origem = 'envio'", [ctx.org])).rows[0].n;
+  if (total >= 300) falha("O banco aceita até 300 arquivos enviados. Remova alguns para enviar novos.");
+  let dados = b.dados, capa = video ? capaDe(b.capa) : undefined;
+  const tamanho = b.caminho ? (await (await import("node:fs/promises")).stat(b.caminho)).size : dados.length;
+  // MP4 acima do limite do volume também é reduzido aqui
+  if (b.tipo === "video/mp4" && (b.caminho || tamanho > 25 * 1024 * 1024)) converter = true;
+  if (converter) { const c = await converterParaMp4(b.caminho || dados); dados = c.dados; capa = capa || c.capa; }
+  const nomeArquivo = converter ? String(b.nome || "video").replace(/\.[^.]+$/, "") + ".mp4" : b.nome;
+  const arquivo = await salvarArquivo(ctx.org, { tipo: video ? "video/mp4" : b.tipo, nome: nomeArquivo, dados, capa });
+  // já sai no padrão do Instagram: não precisa converter de novo na hora de publicar
+  if (converter) await db().query("update arquivos set padronizado = true where id = $1", [arquivo]);
+  const nome = texto(b.titulo, 80);
+  const { rows } = await db().query("insert into banco_imagens (org_id, arquivo_id, nome) values ($1, $2, $3) returning id", [ctx.org, arquivo, nome]);
+  // A IA descreve a foto em segundo plano (nome, descrição e etiquetas). Se não houver chave do Claude, fica para a pessoa preencher.
+  if (b.descrever !== false && !video) await enfileirar(ctx.org, "descreverImagem", { imagem: rows[0].id }, ctx.usuario.id);
+  return { id: rows[0].id };
+}

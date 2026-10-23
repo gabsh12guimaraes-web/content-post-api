@@ -9,7 +9,8 @@ import { hashToken } from "./cripto.js";
 import { ErroApi, UUID } from "./erros.js";
 import { infoArquivo, lerPedaco } from "./arquivos.js";
 import { acoesConta, acoesOrg } from "./acoes/conta.js";
-import { acoesPauta } from "./acoes/pauta.js";
+import { acoesPauta, guardarEnvioNoBanco } from "./acoes/pauta.js";
+import path from "node:path";
 import { acoesMegaBrain } from "./mega-brain.js";
 import { acoesTipografia } from "./tipografia.js";
 import { acoesAcervoMagnific } from "./acervo-magnific.js";
@@ -62,7 +63,7 @@ async function contexto(req) {
   return { sessao: s.id, usuario: { id: s.usuario_id, email: s.email, nome: s.nome, confirmacaoPendente: confirmacaoPendente(s) }, org: m ? m.org_id : null, papel: m ? m.papel : null };
 }
 
-const LIMITE_VIDEO_BRUTO = 300 * 1024 * 1024;
+const LIMITE_VIDEO_BRUTO = 1536 * 1024 * 1024; // 1,5 GB: cobre alguns minutos de 4K do iPhone
 export async function criarApp() {
   const app = Fastify({ logger: false, bodyLimit: 90 * 1024 * 1024, trustProxy: Number(process.env.PROXIES_CONFIAVEIS || 1) });
   // Respostas em JSON e CSV vão comprimidas (a pauta cai de ~300 KB para ~40 KB no celular).
@@ -134,25 +135,35 @@ export async function criarApp() {
     return rep.header("content-length", total).send(lerPedaco(a.arq, 0, total - 1));
   });
 
-  // Vídeo grande (ex.: .mov de 1-2 min do iPhone) chega como arquivo, sem base64, e o servidor converte para MP4.
-  app.addContentTypeParser("application/octet-stream", { parseAs: "buffer", bodyLimit: LIMITE_VIDEO_BRUTO }, (req, corpo, pronto) => pronto(null, corpo));
-  app.post("/video", { bodyLimit: LIMITE_VIDEO_BRUTO }, async (req, rep) => {
+  // Vídeo grande (ex.: .mov 4K do iPhone, de centenas de MB) chega como arquivo, sem base64, e é gravado no disco
+  // enquanto chega (não fica na memória); depois o servidor converte para MP4.
+  app.addContentTypeParser("application/octet-stream", (req, payload, pronto) => pronto(null, payload));
+  app.post("/video", async (req, rep) => {
+    const os = await import("node:os"), fsp = await import("node:fs/promises"), { createWriteStream } = await import("node:fs"), { pipeline } = await import("node:stream/promises");
+    let pasta = null;
     try {
       const ctx = await contexto(req);
       if (!ctx) throw new ErroApi("Sua sessão expirou. Entre de novo.", 401, { login: true });
       if (ctx.usuario.confirmacaoPendente) throw new ErroApi("Confirme seu e-mail para continuar.", 403, { confirmarEmail: true });
       if (!ctx.org) throw new ErroApi("Crie uma organização ou aceite um convite para começar.", 409, { semOrganizacao: true });
-      if (!Buffer.isBuffer(req.body) || !req.body.length) throw new ErroApi("Arquivo vazio.");
+      const declarado = Number(req.headers["content-length"] || 0);
+      if (declarado > LIMITE_VIDEO_BRUTO) throw new ErroApi(`O vídeo tem ${Math.round(declarado / 1048576)} MB; o limite é de ${Math.round(LIMITE_VIDEO_BRUTO / 1048576)} MB.`, 413);
+      pasta = await fsp.mkdtemp(path.join(os.tmpdir(), "envio-"));
+      const destino = path.join(pasta, "video");
+      let recebido = 0;
+      await pipeline(req.body, async function* (fonte) { for await (const pedaco of fonte) { recebido += pedaco.length; if (recebido > LIMITE_VIDEO_BRUTO) throw new ErroApi("O vídeo passou do limite de tamanho.", 413); yield pedaco; } }, createWriteStream(destino));
+      if (!recebido) throw new ErroApi("Arquivo vazio.");
       const q = req.query || {}, t0 = Date.now();
-      const r = await TODAS.enviarImagemBanco(ctx, { bruto: req.body, tipo: String(q.tipo || ""), nome: String(q.nome || "video"), titulo: String(q.titulo || ""), descrever: false });
-      console.log(`[video] envio de ${(req.body.length / 1048576).toFixed(0)} MB convertido em ${((Date.now() - t0) / 1000).toFixed(0)} s`);
+      const r = await guardarEnvioNoBanco(ctx, { caminho: destino, tipo: String(q.tipo || ""), nome: String(q.nome || "video"), titulo: String(q.titulo || ""), descrever: false });
+      console.log(`[video] envio de ${(recebido / 1048576).toFixed(0)} MB convertido em ${((Date.now() - t0) / 1000).toFixed(0)} s`);
       return { ok: true, ...r };
     } catch (e) {
+      req.body?.resume?.(); // descarta o resto do envio se parou antes
       if (e instanceof ErroApi) return rep.code(e.status).send({ ok: false, erro: e.message, ...e.extra });
       if (e && Number(e.status) >= 400 && Number(e.status) < 500 && e.message) return rep.code(Number(e.status)).send({ ok: false, erro: e.message });
       console.error("[video envio]", e);
       return rep.code(500).send({ ok: false, erro: "Não consegui converter o vídeo. Tente de novo; se continuar, exporte em MP4." });
-    }
+    } finally { if (pasta) await fsp.rm(pasta, { recursive: true, force: true }).catch(() => {}); }
   });
 
   app.post("/api", async (req, rep) => {

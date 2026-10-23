@@ -62,34 +62,72 @@ export function padronizarVideo(arq) {
   });
 }
 
-// Vídeos que não chegam em MP4 (sobretudo o .mov do iPhone, muitas vezes em HEVC) são convertidos aqui, porque
+// Vídeos que não chegam em MP4 (sobretudo o .mov do iPhone, muitas vezes em HEVC e 4K) são convertidos aqui, porque
 // a conversão no navegador falha no iPhone e no app. Sai H.264 + AAC, 30 fps, índice no começo, com a qualidade
-// ajustada para caber no limite do volume. Devolve o MP4 e um quadro (JPEG) para a capa.
+// ajustada para caber no limite do volume. A entrada é um arquivo no disco (ou um Buffer, gravado antes num temporário).
 export const LIMITE_MP4 = 24 * 1024 * 1024;
-export function converterParaMp4(dados, { maxSegundos = 300 } = {}) {
+const erro400 = msg => Object.assign(new Error(msg), { status: 400 });
+async function examinar(arq) {
+  const info = await rodar(["-hide_banner", "-i", arq], 30000).catch(e => e.saida || e.message);
+  const m = /Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/.exec(info);
+  return { duracao: m ? +m[1] * 3600 + +m[2] * 60 + +m[3] : 0, video: /Stream #.*Video:/.test(info), audio: /Stream #.*Audio:/.test(info) };
+}
+// bitrate para caber em ~23 MB (com folga para o áudio e o contêiner); vídeos longos saem em 720p
+const qualidade = dur => { const kbps = Math.max(450, Math.min(6000, Math.floor((23 * 8 * 1024) / dur) - 140)); return { kbps, lado: kbps < 1600 ? 720 : 1080 }; };
+const codificacao = kbps => ["-c:v", "libx264", "-preset", "veryfast", "-profile:v", "high", "-b:v", kbps + "k", "-maxrate", Math.round(kbps * 1.4) + "k", "-bufsize", kbps * 2 + "k", "-g", "60", "-threads", "0"];
+async function finalizar(saida, pasta, dur) {
+  const mp4 = await fs.readFile(saida);
+  if (mp4.length > LIMITE_MP4) throw erro400("Mesmo convertido, o vídeo ficou grande demais. Envie um trecho mais curto.");
+  const path = await import("node:path"), capa = path.join(pasta, "capa.jpg");
+  let quadro;
+  try { await rodar(["-hide_banner", "-y", "-ss", String(Math.min(1, dur / 2)), "-i", saida, "-frames:v", "1", "-vf", "scale=720:-2", capa], 30000); quadro = await fs.readFile(capa); } catch (e) {}
+  return { dados: mp4, capa: quadro, duracao: dur };
+}
+export function converterParaMp4(entrada, { maxSegundos = 300 } = {}) {
   return umPorVez(async () => {
     const os = await import("node:os"), path = await import("node:path");
     const pasta = await fs.mkdtemp(path.join(os.tmpdir(), "conv-"));
     try {
-      const entrada = path.join(pasta, "entrada"), saida = path.join(pasta, "saida.mp4"), capa = path.join(pasta, "capa.jpg");
-      await fs.writeFile(entrada, dados);
-      const info = await rodar(["-hide_banner", "-i", entrada], 30000).catch(e => e.saida || e.message);
-      const m = /Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/.exec(info);
-      const dur = m ? +m[1] * 3600 + +m[2] * 60 + +m[3] : 0;
-      if (!/Stream #.*Video:/.test(info) || !dur) throw Object.assign(new Error("Não consegui abrir este vídeo. Exporte em MOV ou MP4 e tente de novo."), { status: 400 });
-      if (dur > maxSegundos) throw Object.assign(new Error(`O vídeo tem ${Math.round(dur / 60)} min; o limite é de ${Math.round(maxSegundos / 60)} minutos. Corte o trecho que vai usar.`), { status: 400 });
-      const audio = /Stream #.*Audio:/.test(info);
-      // bitrate para caber em ~23 MB (com folga para o áudio e o contêiner); vídeos longos saem em 720p
-      const kbps = Math.max(450, Math.min(6000, Math.floor((23 * 8 * 1024) / dur) - 140)), lado = kbps < 1600 ? 720 : 1080;
+      let arq = entrada;
+      if (Buffer.isBuffer(entrada)) { arq = path.join(pasta, "entrada"); await fs.writeFile(arq, entrada); }
+      const saida = path.join(pasta, "saida.mp4"), info = await examinar(arq), dur = info.duracao;
+      if (!info.video || !dur) throw erro400("Não consegui abrir este vídeo. Exporte em MOV ou MP4 e tente de novo.");
+      if (dur > maxSegundos) throw erro400(`O vídeo tem ${Math.round(dur / 60)} min; o limite é de ${Math.round(maxSegundos / 60)} minutos. Corte o trecho que vai usar.`);
+      const { kbps, lado } = qualidade(dur);
       const escala = `scale='if(gt(iw,ih),-2,min(${lado},iw))':'if(gt(iw,ih),min(${lado},ih),-2)':flags=bicubic,fps=30,format=yuv420p`;
-      await rodar(["-hide_banner", "-y", "-i", entrada, "-map", "0:v:0", ...(audio ? ["-map", "0:a:0"] : []), "-vf", escala,
-        "-c:v", "libx264", "-preset", "veryfast", "-profile:v", "high", "-b:v", kbps + "k", "-maxrate", Math.round(kbps * 1.4) + "k", "-bufsize", kbps * 2 + "k", "-g", "60",
-        ...(audio ? ["-c:a", "aac", "-b:a", "128k", "-ar", "48000", "-ac", "2"] : []), "-movflags", "+faststart", "-max_muxing_queue_size", "2048", saida]);
-      const mp4 = await fs.readFile(saida);
-      if (mp4.length > LIMITE_MP4) throw Object.assign(new Error("Mesmo convertido, o vídeo ficou grande demais. Envie um trecho mais curto."), { status: 400 });
-      let quadro;
-      try { await rodar(["-hide_banner", "-y", "-ss", String(Math.min(1, dur / 2)), "-i", saida, "-frames:v", "1", "-vf", "scale=720:-2", capa], 30000); quadro = await fs.readFile(capa); } catch (e) {}
-      return { dados: mp4, capa: quadro, duracao: dur };
+      await rodar(["-hide_banner", "-y", "-i", arq, "-map", "0:v:0", ...(info.audio ? ["-map", "0:a:0"] : []), "-vf", escala, ...codificacao(kbps),
+        ...(info.audio ? ["-c:a", "aac", "-b:a", "128k", "-ar", "48000", "-ac", "2"] : []), "-movflags", "+faststart", "-max_muxing_queue_size", "4096", saida], 20 * 60000);
+      return await finalizar(saida, pasta, dur);
+    } finally { await fs.rm(pasta, { recursive: true, force: true }); }
+  });
+}
+// Junta vários vídeos, na ordem, numa sequência vertical 9:16 (cada um encaixado sem cortar, com o som de cada um;
+// quem não tem som ganha silêncio). Devolve também onde cada parte começa e termina na sequência.
+export function juntarVideos(arquivos, { maxSegundos = 300 } = {}) {
+  return umPorVez(async () => {
+    const os = await import("node:os"), path = await import("node:path");
+    const pasta = await fs.mkdtemp(path.join(os.tmpdir(), "junta-"));
+    try {
+      const infos = [];
+      for (const a of arquivos) { const i = await examinar(a); if (!i.video || !i.duracao) throw erro400("Um dos vídeos não abriu. Envie de novo em MP4 ou MOV."); infos.push(i); }
+      const total = infos.reduce((t, i) => t + i.duracao, 0);
+      if (total > maxSegundos) throw erro400(`Os vídeos somam ${Math.round(total / 60)} min; o limite da sequência é de ${Math.round(maxSegundos / 60)} minutos.`);
+      const { kbps, lado } = qualidade(total), L = lado === 720 ? 720 : 1080, A = Math.round(L * 16 / 9);
+      const entradas = [], filtros = [], pares = [];
+      arquivos.forEach((a, k) => entradas.push("-i", a));
+      infos.forEach((i, k) => { if (!i.audio) entradas.push("-f", "lavfi", "-t", i.duracao.toFixed(3), "-i", "anullsrc=channel_layout=stereo:sample_rate=48000"); });
+      let silencio = arquivos.length;
+      infos.forEach((i, k) => {
+        filtros.push(`[${k}:v:0]scale=${L}:${A}:force_original_aspect_ratio=decrease:flags=bicubic,pad=${L}:${A}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=30,format=yuv420p[v${k}]`);
+        filtros.push(`[${i.audio ? k + ":a:0" : (silencio++) + ":a:0"}]aresample=48000,aformat=channel_layouts=stereo[a${k}]`);
+        pares.push(`[v${k}][a${k}]`);
+      });
+      filtros.push(`${pares.join("")}concat=n=${arquivos.length}:v=1:a=1[v][a]`);
+      const saida = path.join(pasta, "sequencia.mp4");
+      await rodar(["-hide_banner", "-y", ...entradas, "-filter_complex", filtros.join(";"), "-map", "[v]", "-map", "[a]", ...codificacao(kbps),
+        "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", "-max_muxing_queue_size", "4096", saida], 20 * 60000);
+      let ini = 0; const partes = infos.map(i => { const p = { inicio: +ini.toFixed(3), fim: +(ini + i.duracao).toFixed(3) }; ini += i.duracao; return p; });
+      return { ...(await finalizar(saida, pasta, total)), partes };
     } finally { await fs.rm(pasta, { recursive: true, force: true }); }
   });
 }

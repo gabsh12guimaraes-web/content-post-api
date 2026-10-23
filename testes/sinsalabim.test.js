@@ -146,3 +146,22 @@ test('edição de retenção: destaques gigantes, apoio no topo, transições, c
   const legendas = trilhas.filter(c=>c.asset.type==='html5' && c.asset.html.includes('caixa'));
   assert(legendas.every(l => !p.destaques.some(d => l.start < d.inicio + d.duracao && l.start + l.length > d.inicio)), 'a legenda sai da frente do destaque');
 });
+
+test('vários vídeos viram uma sequência na ordem, com as partes marcadas para a edição', async () => {
+  const v1 = await api({acao:'enviarImagemBanco',tipo:'video/mp4',nome:'parte-1.mp4',titulo:'Abertura',base64:dados.toString('base64'),descrever:false},token);
+  const v2 = await api({acao:'enviarImagemBanco',tipo:'video/mp4',nome:'parte-2.mp4',titulo:'Produto',base64:dados.toString('base64'),descrever:false},token);
+  assert.equal((await api({acao:'criarSinsalabim',pedido:crypto.randomUUID(),bancos:[v1.id,v1.id],mensagem:'Junte os vídeos numa sequência.'},token)).status,400,'vídeo repetido');
+  const r = await api({acao:'criarSinsalabim',pedido:crypto.randomUUID(),bancos:[v1.id,v2.id],mensagem:'Junte os vídeos numa sequência.'},token);
+  assert.equal(r.status,200,r.erro);
+  const e = (await esperar(async()=>{const x=await api({acao:'obterSinsalabim',id:r.id},token);return ['pronto','erro'].includes(x.edicao?.status)&&x;})).edicao;
+  assert.equal(e.status,'pronto',e.erro||'');
+  assert.equal(e.partes.length,2); assert.deepEqual(e.partes.map(p=>p.nome),['Abertura','Produto']);
+  assert.equal(e.partes[0].inicio,0); assert(Math.abs(e.partes[1].inicio-e.partes[0].fim)<0.01,'a segunda parte começa onde a primeira termina');
+  const original=(await db().query("select arquivo_id from banco_imagens where id=$1",[v1.id])).rows[0].arquivo_id;
+  const linha=(await db().query("select e.arquivo_id, e.duracao, a.tipo from sinsalabim_edicoes e join arquivos a on a.id=e.arquivo_id where e.id=$1",[r.id])).rows[0];
+  assert.notEqual(linha.arquivo_id,original,'a edição usa o vídeo já unido'); assert.equal(linha.tipo,'video/mp4');
+  assert(Math.abs(Number(linha.duracao)-e.partes[1].fim)<0.2,'duração da sequência inteira');
+  assert.equal(e.etapa,'planejando');
+  const outra = await api({acao:'criarSinsalabim',pedido:crypto.randomUUID(),bancos:[v1.id,v2.id],mensagem:'Quero editar estes vídeos.'},b.token);
+  assert.equal(outra.status,404,'outra organização não usa os vídeos');
+});
