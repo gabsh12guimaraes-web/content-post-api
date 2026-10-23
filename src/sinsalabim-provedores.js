@@ -20,6 +20,12 @@ export async function examinarSinsa(arq) {
   if(duracao>300 || duracao<1)throw Object.assign(new Error('Envie um vídeo de 1 segundo a 5 minutos.'),{status:400});
   return {duracao,audio:r.erro.includes('Audio:')};
 }
+// Miniatura JPEG de até 384 px para a IA ver a foto do banco.
+export async function miniaturaSinsa(arq) {
+  const pasta=await fs.mkdtemp(path.join(os.tmpdir(),'sinsa-mini-'));
+  try {const saida=path.join(pasta,'mini.jpg');const r=await comando(['-hide_banner','-y','-i',arq,'-frames:v','1','-vf','scale=384:384:force_original_aspect_ratio=decrease','-q:v','5',saida],15000);if(r.code!==0)return null;return await fs.readFile(saida);}
+  finally {await fs.rm(pasta,{recursive:true,force:true});}
+}
 export async function transcreverSinsa(org,arq,temAudio) {
   if(!temAudio)return {texto:'',palavras:[]};
   const pasta=await fs.mkdtemp(path.join(os.tmpdir(),'sinsa-'));

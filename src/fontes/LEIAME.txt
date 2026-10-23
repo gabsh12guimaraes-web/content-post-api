@@ -1,0 +1,2 @@
+Montserrat e Pacifico (Google Fonts), licença SIL Open Font License 1.1 (https://openfontlicense.org).
+Recorte "latin" (inclui acentos do português). Embutidas nas legendas renderizadas pelo Shotstack.

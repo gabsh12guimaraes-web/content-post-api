@@ -18,7 +18,7 @@ const {conectar,db,desconectar}=await import('../src/db.js');
 const {criarApp}=await import('../src/app.js');
 const {cifrar}=await import('../src/cripto.js');
 const {processarSinsalabim,cotaSinsa}=await import('../src/sinsalabim.js');
-const {limparPlanoSinsa,timelineSinsa}=await import('../src/sinsalabim-plano.js');
+const {limparPlanoSinsa,timelineSinsa,gruposLegendas}=await import('../src/sinsalabim-plano.js');
 await conectar();const app=await criarApp();const originalFetch=globalThis.fetch;
 let claudeFalhas=0,transcricoes=0,renders=0,analises=0,recusar=false,falhaRender=false,incerto=false;
 const planoBase={titulo:'Um conteúdo que conecta',resumo:'Cortei a pausa e destaquei as palavras.',estilo:'dinamico',cor:'#ff5478',cortes:[{inicio:0,fim:1.9,zoom:true}],legendas:true,tituloTela:'Uma boa ideia',chamada:'Conheça a marca',legenda:'Conteúdo feito com cuidado.',hashtags:'#marca',apoios:[],avisos:[]};
@@ -124,28 +124,35 @@ test('uma exportação Sandbox mantém seu ambiente e não entra na revisão de 
  assert.equal((await api({acao:'revisarSinsalabim',exportacao:r.id,data:new Date(Date.now()+86400000).toISOString()},token)).status,400);
 });
 
-test('edição de retenção: destaques gigantes, apoio no topo, transições, cor viva e legenda em pílula', () => {
-  const palavras = [{texto:'O',inicio:0.1,fim:0.2},{texto:'carvão',inicio:0.3,fim:0.8},{texto:'mancha',inicio:1.0,fim:1.4},{texto:'o',inicio:1.5,fim:1.6},{texto:'esmalte.',inicio:4.1,fim:4.6},{texto:'fim',inicio:5.6,fim:5.9}];
+test('edição estilo Captions: tira pausas, zoom fixo alternado, legenda curta e destaque cursivo', () => {
+  // Fala com uma pausa longa (1.4 a 4.1 s) no meio do primeiro trecho.
+  const palavras = [{texto:'O',inicio:0.1,fim:0.2},{texto:'carvão',inicio:0.3,fim:0.8},{texto:'mancha',inicio:1.0,fim:1.4},{texto:'o',inicio:4.1,fim:4.2},{texto:'esmalte.',inicio:4.3,fim:4.8},{texto:'Viu',inicio:5.6,fim:5.9},{texto:'só?',inicio:6.0,fim:6.3},{texto:'Faz',inicio:7.5,fim:7.8},{texto:'diferença',inicio:7.9,fim:8.5}];
   const banco = [{id:'img-1',url:'https://api.example.com/f/1/k'}];
-  const p = limparPlanoSinsa({...planoBase, visual:'vibrante', legendaEstilo:'pilula',
-    cortes:[{inicio:0,fim:2,transicao:'zoom'},{inicio:4,fim:5.5,transicao:'deslizar'},{inicio:5.5,fim:6,transicao:'explodir'}],
-    destaques:[{indice:4},{indice:1,texto:'CARVÃO',apoio:'não clareia'},{indice:2},{indice:99},{indice:3.5}],
-    apoios:[{banco:'img-1',inicio:0.5,duracao:1.5,layout:'topo'},{banco:'img-1',inicio:2.2,duracao:1,layout:'girar'}]}, 6, banco, palavras);
-  assert.deepEqual(p.cortes.map(c=>c.transicao), ['corte','deslizar','corte'], 'o primeiro trecho entra seco e transição desconhecida vira corte');
-  assert.equal(p.visual,'vibrante'); assert.equal(p.legendaEstilo,'pilula');
-  assert.deepEqual(p.apoios.map(a=>a.layout), ['topo','tela']);
-  // "esmalte." foi dito aos 4.1 s do original = 2.1 s na edição (o trecho de 2 a 4 s saiu); "mancha" encosta no destaque anterior e cai
-  assert.deepEqual(p.destaques.map(d=>[d.texto,d.inicio]), [['CARVÃO',0.25],['esmalte',2.05]]);
-  assert.equal(p.destaques[0].apoio,'não clareia');
+  const p = limparPlanoSinsa({...planoBase, visual:'vibrante', legendaEstilo:'palavra',
+    cortes:[{inicio:0,fim:5,transicao:'zoom'},{inicio:5.5,fim:9,transicao:'deslizar'}],
+    destaques:[{indice:1,texto:'Carvão',apoio:'não clareia'},{indice:2},{indice:4},{indice:99}],
+    apoios:[{banco:'img-1',inicio:0.5,duracao:9,layout:'girar'},{banco:'img-1',inicio:2,duracao:3,layout:'tela'},{banco:'de-fora',inicio:0,duracao:1}]}, 9, banco, palavras);
+  // A pausa vira um salto: 0 a 1.58 e 3.98 a 5 (zoom alternado); "deslizar" antigo vira entrada suave.
+  assert.deepEqual(p.cortes.map(c=>[c.inicio,c.fim,c.zoom,c.transicao]), [[0,1.58,true,'corte'],[3.98,5,false,'corte'],[5.5,6.48,false,'suave'],[7.38,9,true,'corte']]);
+  assert.equal(p.legendaEstilo,'captions','estilo desconhecido ou antigo vira o padrão');
+  assert.deepEqual(p.apoios.map(a=>[a.layout,a.duracao]), [['topo',3],['tela',1.5]], 'tela cheia no máximo 1,5 s');
+  assert.deepEqual(p.destaques.map(d=>d.texto), ['Carvão','esmalte'], '"mancha" encosta no destaque anterior e cai');
+  const grupos = gruposLegendas(p).map(g=>g.map(w=>w.texto).join(' '));
+  assert(grupos.every(g=>g.split(' ').length<=3)); assert(grupos.includes('Viu só?'));
   const t = timelineSinsa(p,'https://api.example.com/f/v/k',banco), trilhas = t.timeline.tracks.flatMap(x=>x.clips), json = JSON.stringify(t);
   const videos = trilhas.filter(c=>c.asset.type==='video');
-  assert(videos.every(c=>c.filter==='boost'), 'cor viva no vídeo todo');
-  assert.equal(videos[0].transition, undefined); assert.equal(videos[1].transition.in, 'slideLeft');
-  const topo = trilhas.find(c=>c.asset.type==='image'); assert.deepEqual(topo.crop, {bottom:0.5});
-  assert(json.includes('CARV') && json.includes('class=\\"d\\"'), 'destaque entra como camada própria');
-  assert(json.includes('class=\\"caixa\\"'), 'legenda em pílula');
-  const legendas = trilhas.filter(c=>c.asset.type==='html5' && c.asset.html.includes('caixa'));
-  assert(legendas.every(l => !p.destaques.some(d => l.start < d.inicio + d.duracao && l.start + l.length > d.inicio)), 'a legenda sai da frente do destaque');
+  assert(videos.every(c=>c.filter==='boost' && !c.effect), 'cor viva e nada de zoom lento');
+  assert.deepEqual(videos.map(c=>c.scale||1), [1.12,1,1,1.12]);
+  assert.equal(videos[2].transition.in, 'fadeFast'); assert.equal(videos[0].transition, undefined);
+  const texto = trilhas.filter(c=>c.asset.type==='html5');
+  assert.equal(texto.length, 1, 'legendas, destaques e chamadas numa camada só');
+  assert.equal(texto[0].start, 0); assert.equal(texto[0].length, p.duracao);
+  assert(texto[0].asset.css.includes('data:font/woff2;base64,'), 'fontes embutidas');
+  assert(json.includes('Carv') && json.includes('class=\\"j dest\\"') && json.includes('não clareia'));
+  const topo = trilhas.find(c=>c.asset.type==='image'); assert.equal(topo.position,'top'); assert.equal(topo.fit,'contain');
+  // Enquanto o destaque aparece, nenhum bloco de legenda é mostrado.
+  const blocos = [...texto[0].asset.html.matchAll(/class="j leg" style="animation:ver ([\d.]+)s linear ([\d.]+)s/g)].map(m=>[+m[2],+m[2]+ +m[1]]);
+  assert(blocos.length && blocos.every(([a,b]) => !p.destaques.some(d => a < d.inicio + d.duracao && b > d.inicio)));
 });
 
 test('vários vídeos viram uma sequência na ordem, com as partes marcadas para a edição', async () => {
