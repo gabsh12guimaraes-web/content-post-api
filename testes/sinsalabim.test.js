@@ -18,7 +18,7 @@ const {conectar,db,desconectar}=await import('../src/db.js');
 const {criarApp}=await import('../src/app.js');
 const {cifrar}=await import('../src/cripto.js');
 const {processarSinsalabim,cotaSinsa}=await import('../src/sinsalabim.js');
-const {limparPlanoSinsa,timelineSinsa,gruposLegendas,personalizarPlanoSinsa}=await import('../src/sinsalabim-plano.js');
+const {limparPlanoSinsa,timelineSinsa,gruposLegendas,personalizarPlanoSinsa,camadaTextoSinsa}=await import('../src/sinsalabim-plano.js');
 await conectar();const app=await criarApp();const originalFetch=globalThis.fetch;
 let claudeFalhas=0,transcricoes=0,renders=0,analises=0,recusar=false,falhaRender=false,incerto=false;
 const planoBase={titulo:'Um conteúdo que conecta',resumo:'Cortei a pausa e destaquei as palavras.',estilo:'dinamico',cor:'#ff5478',cortes:[{inicio:0,fim:1.9,zoom:true}],legendas:true,tituloTela:'Uma boa ideia',chamada:'Conheça a marca',legenda:'Conteúdo feito com cuidado.',hashtags:'#marca',apoios:[],avisos:[]};
@@ -237,4 +237,50 @@ test('renomear o projeto de vídeo', async () => {
   assert.equal((await api({acao:'listarSinsalabim'},token)).edicoes.find(x=>x.id===edicao).nome,'Campanha de outubro');
   assert.equal((await api({acao:'renomearSinsalabim',id:edicao,nome:''},token)).status,400);
   assert.equal((await api({acao:'renomearSinsalabim',id:edicao,nome:'Outro'},b.token)).status,404);
+});
+
+test('editor: cortes aparados e divididos refazem a legenda e levam os textos ligados à fala', () => {
+  const palavras = [{texto:'Um',inicio:0.2,fim:0.5},{texto:'dois',inicio:0.6,fim:0.9},{texto:'três',inicio:2.2,fim:2.6},{texto:'quatro',inicio:4.1,fim:4.6}];
+  const base = limparPlanoSinsa({...planoBase,tirarPausas:false,cortes:[{inicio:0,fim:5}],destaques:[{indice:3,texto:'Quatro',animacao:'caixa',cor:'#ffe14a'}]}, 5, [], palavras);
+  assert.equal(base.destaques[0].falaEm, 4.1); assert.equal(base.destaques[0].animacao, 'caixa');
+  // Tira o trecho do meio (1 a 4 s): "três" some da legenda e o destaque de "quatro" anda para trás.
+  const p = personalizarPlanoSinsa(base, {cortes:[{inicio:0,fim:1},{inicio:4,fim:5,transicao:'suave'},{inicio:0.5,fim:0.6}]}, [], {palavras, duracaoFonte:5});
+  assert.deepEqual(p.cortes.map(c=>[c.inicio,c.fim,c.transicao]), [[0,1,'corte'],[4,5,'suave']], 'sobreposto sai');
+  assert.equal(p.duracao, 2); assert.deepEqual(p.palavras.map(w=>w.texto), ['Um','dois','quatro']);
+  assert.equal(p.destaques.length, 1); assert(Math.abs(p.destaques[0].inicio - 1.05) < 0.06, String(p.destaques[0].inicio));
+  // Cortar a fala do destaque tira o destaque; sem nenhum trecho, é erro.
+  assert.equal(personalizarPlanoSinsa(base, {cortes:[{inicio:0,fim:2}]}, [], {palavras, duracaoFonte:5}).destaques.length, 0);
+  assert.throws(() => personalizarPlanoSinsa(base, {cortes:[]}, [], {palavras, duracaoFonte:5}), /pelo menos um trecho/);
+});
+test('editor: textos livres, cards, animações, imagens que pulam, música e efeitos sonoros', () => {
+  const palavras = [{texto:'Olha',inicio:0.1,fim:0.4},{texto:'isso',inicio:0.5,fim:0.9}];
+  const banco = [{id:'img-1',url:'https://api.example.com/f/1/k'}], musicas = [{id:'mus-1',nome:'Trilha',url:'https://api.example.com/f/m/k'}];
+  const base = limparPlanoSinsa({...planoBase,tirarPausas:false,cortes:[{inicio:0,fim:10}]}, 10, banco, palavras);
+  const p = personalizarPlanoSinsa(base, {
+    animLegenda:'digitar', sfx:true, voz:80, musica:{banco:'mus-1',volume:30,inicio:12},
+    destaques:[{texto:'EDIT',inicio:2,duracao:1.2,animacao:'caixa',cor:'#FFE14A',y:420,tamanho:1.3},{texto:'Livre',inicio:5,animacao:'digitar',fonte:'forte'},{texto:'',inicio:1}],
+    cards:[{tipo:'numero',texto:'92%',sub:'voltam a comprar',inicio:3,duracao:2},{tipo:'selo',texto:'com',sub:'motion',inicio:7,animacao:'deslizar'},{tipo:'emoji',texto:'x',inicio:1}],
+    apoios:[{banco:'img-1',inicio:6,duracao:2,layout:'topo',animacao:'pop',inclinar:true}],
+  }, banco, {palavras, duracaoFonte:10, musicas});
+  assert.equal(p.animLegenda,'digitar'); assert.equal(p.destaques.length,2); assert.equal(p.destaques[0].y,420); assert.equal(p.cards.length,2);
+  assert.equal(personalizarPlanoSinsa(p,{musica:{banco:'de-fora'}},banco,{musicas}).musica,null,'música de fora do banco não entra');
+  const t = timelineSinsa(p,'https://api.example.com/f/v/k',banco,{musicas,sfxBase:'https://api.example.com/sfx'}), clips = t.timeline.tracks.flatMap(x=>x.clips);
+  const html = clips.find(c=>c.asset.type==='html5').asset;
+  assert(html.html.includes('card-n') && html.html.includes('92%') && html.html.includes('card-s') && html.html.includes('<em>motion</em>'));
+  assert(html.html.includes('animation:caixa') && html.html.includes('animation:digita') && html.html.includes('mostra .08s'));
+  assert(html.css.includes('font-family:SinsaForte'));
+  const img = clips.find(c=>c.asset.type==='image'); assert.deepEqual(img.transition,{in:'zoom',out:'fadeFast'}); assert.equal(img.transform.rotate.angle,-4);
+  assert.equal(clips.find(c=>c.asset.type==='video').asset.volume,0.8);
+  const audios = clips.filter(c=>c.asset.type==='audio');
+  const trilha = audios.find(a=>a.asset.src.includes('/f/m/')); assert.equal(trilha.asset.volume,0.3); assert.equal(trilha.asset.trim,12); assert.equal(trilha.length,p.duracao);
+  assert.equal(audios.filter(a=>a.asset.src.endsWith('/whoosh.mp3')).length,4,'whoosh nos 2 textos e 2 cards'); assert.equal(audios.filter(a=>a.asset.src.endsWith('/pop.mp3')).length,1);
+});
+test('efeitos sonoros servidos pela API e música aceita no banco', async () => {
+  const r = await app.inject({method:'GET',url:'/sfx/whoosh.mp3'}); assert.equal(r.statusCode,200); assert.equal(r.headers['content-type'],'audio/mpeg'); assert(r.rawPayload.length>1000);
+  assert.equal((await app.inject({method:'GET',url:'/sfx/../app.js'})).statusCode,404);
+  const mp3 = (await app.inject({method:'GET',url:'/sfx/pop.mp3'})).rawPayload.toString('base64');
+  const m = await api({acao:'enviarImagemBanco',tipo:'audio/mpeg',base64:mp3,nome:'trilha.mp3',titulo:'Trilha calma'},token);
+  assert.equal(m.status,200,m.erro);
+  const e = (await api({acao:'obterSinsalabim',id:edicao},token)).edicao;
+  assert(e.musicas.some(x=>x.id===m.id&&x.nome==='Trilha calma')); assert(!e.apoios.some(x=>x.id===m.id),'música não aparece como imagem');
 });

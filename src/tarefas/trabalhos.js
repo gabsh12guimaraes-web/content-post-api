@@ -297,8 +297,8 @@ async function bancoParaPost(org, briefing) {
   if (!["banco", "misto"].includes(modo)) return { texto: "", mapa: {} };
   const escolhidas = Array.isArray(briefing.banco) ? briefing.banco.filter(x => /^[0-9a-f-]{36}$/i.test(String(x))) : [];
   const { rows } = escolhidas.length
-    ? await db().query("select b.*, a.tipo from banco_imagens b join arquivos a on a.id = b.arquivo_id where b.org_id = $1 and b.id = any($2::uuid[]) order by b.criado_em desc", [org, escolhidas])
-    : await db().query("select b.*, a.tipo from banco_imagens b join arquivos a on a.id = b.arquivo_id where b.org_id = $1 order by (b.origem = 'envio') desc, b.criado_em desc limit 40", [org]);
+    ? await db().query("select b.*, a.tipo from banco_imagens b join arquivos a on a.id = b.arquivo_id where b.org_id = $1 and a.tipo not like 'audio/%' and b.id = any($2::uuid[]) order by b.criado_em desc", [org, escolhidas])
+    : await db().query("select b.*, a.tipo from banco_imagens b join arquivos a on a.id = b.arquivo_id where b.org_id = $1 and a.tipo not like 'audio/%' order by (b.origem = 'envio') desc, b.criado_em desc limit 40", [org]);
   if (!rows.length) return { texto: "", mapa: {}, vazio: true };
   const mapa = {}; let nf = 0, nv = 0;
   const linhas = rows.map(r => {
@@ -310,7 +310,7 @@ async function bancoParaPost(org, briefing) {
 }
 // A IA escolhe, no banco, as fotos e vídeos que combinam com o post (botão "IA escolhe" no briefing). Devolve os ids do banco, os melhores primeiro.
 export async function escolherDoBanco(org, post, briefing) {
-  const { rows } = await db().query("select b.*, a.tipo from banco_imagens b join arquivos a on a.id = b.arquivo_id where b.org_id = $1 order by (b.origem = 'envio') desc, b.criado_em desc limit 200", [org]);
+  const { rows } = await db().query("select b.*, a.tipo from banco_imagens b join arquivos a on a.id = b.arquivo_id where b.org_id = $1 and a.tipo not like 'audio/%' order by (b.origem = 'envio') desc, b.criado_em desc limit 200", [org]);
   if (!rows.length) return { ids: [], motivo: "" };
   const ids = {}; let nf = 0, nv = 0;
   const linhas = rows.map(r => {

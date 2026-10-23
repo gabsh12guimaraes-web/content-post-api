@@ -103,6 +103,13 @@ export async function criarApp() {
   });
 
   // Arquivos aos pedaços (Range): o vídeo começa a tocar com o primeiro pedaço, sem baixar o arquivo inteiro (o iPhone exige isso).
+  // Efeitos sonoros do Sinsalabim (gerados, sem direitos de terceiros): o Shotstack e a prévia buscam aqui.
+  const SFX = new Map(["whoosh", "pop"].map(n => [n + ".mp3", new URL(`./sfx/${n}.mp3`, import.meta.url)]));
+  app.get("/sfx/:nome", { compress: false }, async (req, rep) => {
+    const arq = SFX.get(req.params.nome); if (!arq) return rep.code(404).send("não encontrado");
+    const fs = await import("node:fs/promises");
+    return rep.header("content-type", "audio/mpeg").header("cache-control", "public, max-age=31536000, immutable").header("access-control-allow-origin", "*").send(await fs.readFile(arq));
+  });
   app.get("/f/:id/:chave", { compress: false }, async (req, rep) => {
     const { id, chave } = req.params;
     if (!UUID.test(id)) return rep.code(404).send("não encontrado");

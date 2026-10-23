@@ -1,0 +1,1 @@
+whoosh.mp3 e pop.mp3: efeitos sonoros gerados com o ffmpeg (ruído rosa filtrado e um tom curto). Sem direitos de terceiros.

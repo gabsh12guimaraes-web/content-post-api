@@ -106,7 +106,7 @@ async function tratarLote(lote) {
 }
 
 const caminho = (org, id) => path.join(config.pastaArquivos, String(org), String(id));
-export const TIPOS_ACEITOS = ["image/png", "image/jpeg", "image/webp", "image/svg+xml", "video/mp4", "font/ttf", "font/otf", "font/woff", "font/woff2"];
+export const TIPOS_ACEITOS = ["image/png", "image/jpeg", "image/webp", "image/svg+xml", "video/mp4", "font/ttf", "font/otf", "font/woff", "font/woff2", "audio/mpeg", "audio/mp4", "audio/aac", "audio/wav"];
 export const LIMITE_BYTES = 25 * 1024 * 1024;
 
 export async function salvarArquivo(org, { tipo, nome, dados, capa }) {

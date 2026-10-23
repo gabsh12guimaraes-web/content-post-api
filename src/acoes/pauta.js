@@ -283,9 +283,11 @@ export const acoesPauta = {
   },
   async enviarImagemBanco(ctx, b) {
     const converter = VIDEOS_PARA_CONVERTER.includes(b.tipo);
-    if (!["image/png", "image/jpeg", "image/webp", "video/mp4"].includes(b.tipo) && !converter) falha("Envie fotos em JPG, PNG ou WEBP, ou vídeos em MP4 ou MOV.");
+    // Músicas (MP3, M4A, AAC ou WAV) também entram no banco, para a trilha do Sinsalabim.
+    const audio = AUDIOS_BANCO[b.tipo];
+    if (!["image/png", "image/jpeg", "image/webp", "video/mp4"].includes(b.tipo) && !converter && !audio) falha("Envie fotos em JPG, PNG ou WEBP, vídeos em MP4 ou MOV, ou músicas em MP3, M4A ou WAV.");
     const video = b.tipo === "video/mp4" || converter;
-    return guardarEnvioNoBanco(ctx, { ...b, dados: doBase64(b.base64, (video ? 60 : 8) * 1024 * 1024) });
+    return guardarEnvioNoBanco(ctx, { ...b, tipo: audio || b.tipo, dados: doBase64(b.base64, (video ? 60 : audio ? 15 : 8) * 1024 * 1024) });
   },
   async salvarImagemBanco(ctx, b) {
     const id = exigirId(b.id);
@@ -308,7 +310,7 @@ export const acoesPauta = {
     const p = await postDaOrg(ctx.org, b.id);
     if (["Publicando", "Publicado"].includes(p.status)) falha("Este post já foi publicado.");
     const n = parseInt(b.slide, 10); if (!(n >= 1 && n <= 20)) falha("Slide inválido.");
-    const img = (await db().query("select b.arquivo_id, a.tipo from banco_imagens b join arquivos a on a.id = b.arquivo_id where b.id = $1 and b.org_id = $2", [exigirId(b.imagem), ctx.org])).rows[0];
+    const img = (await db().query("select b.arquivo_id, a.tipo from banco_imagens b join arquivos a on a.id = b.arquivo_id where b.id = $1 and b.org_id = $2 and a.tipo not like 'audio/%'", [exigirId(b.imagem), ctx.org])).rows[0];
     if (!img) falha("Foto não encontrada no banco.", 404);
     const video = /^video\//.test(img.tipo);
     const fotos = { ...(p.fotos || {}) }, clipes = { ...(p.clipes || {}) }, mapa = video ? clipes : fotos, outro = video ? fotos : clipes;
@@ -418,7 +420,7 @@ export const acoesPauta = {
     if (!["Reels", "Estatico", "Carrossel", "Stories"].includes(b.formato)) falha("Escolha o formato da publicação.");
     const ids = Array.isArray(b.banco) ? b.banco.map(id => exigirId(id)) : [];
     if (!ids.length || ids.length > 10 || new Set(ids).size !== ids.length) falha("Escolha de 1 a 10 arquivos, sem repetir.");
-    const itens = (await db().query("select b.id, b.arquivo_id, a.tipo from banco_imagens b join arquivos a on a.id = b.arquivo_id and a.org_id = b.org_id where b.org_id = $1 and b.id = any($2::uuid[])", [ctx.org, ids])).rows;
+    const itens = (await db().query("select b.id, b.arquivo_id, a.tipo from banco_imagens b join arquivos a on a.id = b.arquivo_id and a.org_id = b.org_id where b.org_id = $1 and a.tipo not like 'audio/%' and b.id = any($2::uuid[])", [ctx.org, ids])).rows;
     if (itens.length !== ids.length) falha("Um dos arquivos não pertence a esta organização ou foi removido.");
     const ordenados = ids.map(id => itens.find(i => i.id === id));
     if (ordenados.some(i => !["image/jpeg", "image/png", "image/webp", "video/mp4"].includes(i.tipo))) falha("Use imagens ou vídeos MP4.");
@@ -662,6 +664,7 @@ export const acoesPauta = {
 };
 
 // Guarda um envio no banco. "caminho" (arquivo no disco) só vem da rota /video, nunca de um pedido JSON.
+const AUDIOS_BANCO = { "audio/mpeg": "audio/mpeg", "audio/mp3": "audio/mpeg", "audio/mp4": "audio/mp4", "audio/x-m4a": "audio/mp4", "audio/m4a": "audio/mp4", "audio/aac": "audio/aac", "audio/wav": "audio/wav", "audio/x-wav": "audio/wav", "audio/wave": "audio/wav" };
 export async function guardarEnvioNoBanco(ctx, b) {
   let converter = VIDEOS_PARA_CONVERTER.includes(b.tipo);
   const video = b.tipo === "video/mp4" || converter;
@@ -680,6 +683,6 @@ export async function guardarEnvioNoBanco(ctx, b) {
   const nome = texto(b.titulo, 80);
   const { rows } = await db().query("insert into banco_imagens (org_id, arquivo_id, nome) values ($1, $2, $3) returning id", [ctx.org, arquivo, nome]);
   // A IA descreve a foto em segundo plano (nome, descrição e etiquetas). Se não houver chave do Claude, fica para a pessoa preencher.
-  if (b.descrever !== false && !video) await enfileirar(ctx.org, "descreverImagem", { imagem: rows[0].id }, ctx.usuario.id);
+  if (b.descrever !== false && !video && !String(b.tipo).startsWith("audio/")) await enfileirar(ctx.org, "descreverImagem", { imagem: rows[0].id }, ctx.usuario.id);
   return { id: rows[0].id };
 }
