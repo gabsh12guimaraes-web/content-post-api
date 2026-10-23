@@ -528,7 +528,7 @@ export const acoesPauta = {
     const emCenas = ["Reels", "Stories"].includes(p.formato) && !(p.briefing && ["imagem", "sequencia"].includes(p.briefing.story));
     const conteudo = { ...(p.conteudo || {}), [emCenas ? "cenas" : "slides"]: slides, legenda, hashtags: hashtags.split(/\s+/).filter(Boolean) };
     // Só a legenda ou as hashtags mudaram: as artes (ou o vídeo) continuam valendo.
-    const naTela = l => JSON.stringify((l || []).map(x => [x.titulo || "", x.texto || "", x.blocos ?? null]));
+    const naTela = l => JSON.stringify((l || []).map(x => [x.titulo || "", x.texto || "", x.blocos && x.blocos.length ? x.blocos : null]));
     const mudouArte = naTela(slides) !== naTela(atuais);
     await db().query("update posts set slides = $2, legenda = $3, hashtags = $4, conteudo = $5, artes_prontas = artes_prontas and not $6, atualizado_em = now() where id = $1",
       [p.id, JSON.stringify(slides), legenda, hashtags, JSON.stringify(conteudo), mudouArte]);
