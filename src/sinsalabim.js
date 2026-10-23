@@ -39,6 +39,11 @@ export async function cotaSinsa(org,q=db()) {
 }
 // Só fotos enviadas pela marca ou do acervo: artes geradas para posts (com texto) não servem de apoio no vídeo.
 const SQL_BANCO="select b.id,b.nome,b.descricao,a.id arquivo_id,a.chave,a.tipo from banco_imagens b join arquivos a on a.id=b.arquivo_id where b.org_id=$1 and b.origem in ('envio','acervo') and a.tipo in ('image/jpeg','image/png','image/webp') order by (b.origem='envio') desc,b.criado_em desc limit 30";
+// Escolha à mão (painel): qualquer imagem do banco da organização, inclusive as geradas pela IA.
+const SQL_BANCO_TODO="select b.id,b.nome,b.descricao,b.origem,a.id arquivo_id,a.chave from banco_imagens b join arquivos a on a.id=b.arquivo_id where b.org_id=$1 and a.tipo in ('image/jpeg','image/png','image/webp') order by b.criado_em desc limit 400";
+async function bancoTodoDaOrg(org,q=db()) {
+  return (await q.query(SQL_BANCO_TODO,[org])).rows.map(r=>({id:r.id,nome:r.nome,descricao:r.descricao,origem:r.origem,url:urlArquivo({id:r.arquivo_id,chave:r.chave})}));
+}
 async function bancoDaOrg(org,q=db()) {
   const rows=(await q.query(SQL_BANCO,[org])).rows;
   return rows.map(r=>({id:r.id,nome:r.nome,descricao:r.descricao,url:urlArquivo({id:r.arquivo_id,chave:r.chave})}));
@@ -51,7 +56,7 @@ async function miniaturasBanco(org,banco) {
 async function detalhes(e) {
   const rs=(await db().query('select id,status,versao,ambiente,arquivo_id,post_id,banco_id,erro,criado_em from sinsalabim_exportacoes where edicao_id=$1 and org_id=$2 order by criado_em desc limit 10',[e.id,e.org_id])).rows;
   const arquivos=await anexos(e.org_id,[e.arquivo_id,...rs.map(r=>r.arquivo_id)]);
-  return {id:e.id,nome:e.nome,status:e.status,etapa:e.etapa,partes:e.partes,estilo:e.estilo,duracao:Number(e.duracao),plano:e.plano,versao:e.versao,mensagens:e.mensagens,erro:e.erro,arquivo:arquivos.get(e.arquivo_id),apoios:await bancoDaOrg(e.org_id),exportacoes:rs.map(r=>({...r,arquivo:arquivos.get(r.arquivo_id)||null}))};
+  return {id:e.id,nome:e.nome,status:e.status,etapa:e.etapa,partes:e.partes,estilo:e.estilo,duracao:Number(e.duracao),plano:e.plano,versao:e.versao,mensagens:e.mensagens,erro:e.erro,arquivo:arquivos.get(e.arquivo_id),apoios:await bancoTodoDaOrg(e.org_id),exportacoes:rs.map(r=>({...r,arquivo:arquivos.get(r.arquivo_id)||null}))};
 }
 export const acoesSinsalabim={
   async listarSinsalabim(ctx) {
@@ -111,7 +116,7 @@ export const acoesSinsalabim={
       if(!e.plano||e.status==='analisando')falha('Aguarde a prévia ficar pronta.',409);
       if(Number(b.versao)!==e.versao)falha('A edição mudou enquanto você personalizava. Confira a prévia e tente de novo.',409);
       if((await tx.query('select 1 from sinsalabim_exportacoes where edicao_id=$1 and status=any($2::text[])',[e.id,ATIVOS])).rows.length)falha('Aguarde a exportação terminar antes de mudar o vídeo.',409);
-      const plano=personalizarPlanoSinsa(e.plano,m,await bancoDaOrg(ctx.org,tx));
+      const plano=personalizarPlanoSinsa(e.plano,m,await bancoTodoDaOrg(ctx.org,tx));
       await tx.query('update sinsalabim_edicoes set plano=$2,versao=versao+1,estilo=$3,atualizado_em=now() where id=$1',[e.id,JSON.stringify(plano),plano.estilo]);return e.id;
     });
     return {edicao:await detalhes(await edicaoDaOrg(ctx.org,id)),cota:await cotaSinsa(ctx.org)};
@@ -203,7 +208,8 @@ Padrão de entrega acima da média (use quando o pedido não disser o contrário
 5. Legenda de publicação com gancho na primeira linha, valor no meio e chamada no fim.
 
 Se vierem "partes", o vídeo é a sequência de vários vídeos da pessoa, já unidos nesta ordem (inicio e fim de cada um em segundos): conte uma história contínua aproveitando o melhor de cada parte, sem pular de volta no tempo, e use "suave" na entrada de cada parte nova. Se não houver motivo para encurtar, use um trecho contínuo de até 60 s. Se não houver fala ou não for pedida legenda, use legendas false e destaques vazio. Para corrigir palavras da transcrição quando pedido, inclua correcoes:[{indice:0,texto:"correção"}]; preserve as correções anteriores se não houver pedido para desfazê-las. Não prometa dublagem, troca de rostos, música, emojis/figurinhas, limpeza avançada de ruído, gerar imagens ou vídeos novos ou efeitos fora desta lista; registre em avisos o que não pôde ser feito. Títulos e legenda refletem o conteúdo e a marca, sem inventar fatos. No resumo, diga em uma ou duas frases o que fez nesta versão.`,content:[...imagens,{type:'text',text:JSON.stringify({marca:m,duracao:Number(e.duracao),estilo:e.estilo,...(Array.isArray(e.partes)&&e.partes.length>1?{partes:e.partes.map(p=>({ordem:p.ordem,nome:p.nome,inicio:p.inicio,fim:p.fim}))}:{}),transcricao,conversa:e.mensagens.slice(-10),anterior:e.plano,banco:banco.map(({id,nome,descricao})=>({id,nome,descricao}))})},...vistas]}));
-  const plano=limparPlanoSinsa({...r,correcoes:Array.isArray(r.correcoes)?r.correcoes:e.plano?.correcoes},Number(e.duracao),banco,transcricao.palavras);
+  // A IA escolhe entre as fotos (banco); imagens escolhidas à mão antes, de qualquer origem, continuam valendo.
+  const plano=limparPlanoSinsa({...r,correcoes:Array.isArray(r.correcoes)?r.correcoes:e.plano?.correcoes},Number(e.duracao),await bancoTodoDaOrg(org),transcricao.palavras);
   Object.assign(plano,estiloSinsa(r,e.plano||{}));
   await db().query("update sinsalabim_edicoes set plano=$2,versao=versao+1,status='pronto',erro=null,estilo=$3,mensagens=mensagens || $4::jsonb,atualizado_em=now() where id=$1",[e.id,JSON.stringify(plano),plano.estilo,JSON.stringify([{papel:'assistente',texto:plano.resumo||'Preparei uma nova versão para você conferir na prévia.'}])]);return {};
 }
@@ -216,7 +222,7 @@ registrar('sinsalabimExportar',async(org,{exportacao})=>{
   let enviado=false;
   try {
     const e=await edicaoDaOrg(org,r.edicao_id),a=(await db().query('select * from arquivos where id=$1 and org_id=$2',[e.arquivo_id,org])).rows[0];
-    const timeline=timelineSinsa(r.plano,urlArquivo(a),await bancoDaOrg(org));
+    const timeline=timelineSinsa(r.plano,urlArquivo(a),await bancoTodoDaOrg(org));
     const id=await enviarRenderSinsa(timeline,r.ambiente);
     enviado=true;
     await db().query("update sinsalabim_exportacoes set render_id=$2,status='renderizando',atualizado_em=now() where id=$1",[r.id,id]);
