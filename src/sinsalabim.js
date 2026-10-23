@@ -49,7 +49,9 @@ async function detalhes(e) {
 export const acoesSinsalabim={
   async listarSinsalabim(ctx) {
     const edicoes=(await db().query('select id,nome,status,estilo,versao,atualizado_em from sinsalabim_edicoes where org_id=$1 order by atualizado_em desc limit 20',[ctx.org])).rows;
-    return {edicoes,cota:await cotaSinsa(ctx.org),configurado:sinsaConfigurado(),teste:ambienteSinsa()==='stage',administrador:ehAdmin(ctx.usuario.email)};
+    // Sem chave do Claude a análise falharia depois do envio: o painel avisa antes.
+    const semClaude=await chaveDe(ctx.org,'anthropic').then(()=>'',e=>e instanceof ErroIntegracao?e.message:'');
+    return {edicoes,cota:await cotaSinsa(ctx.org),configurado:sinsaConfigurado(),semClaude,teste:ambienteSinsa()==='stage',administrador:ehAdmin(ctx.usuario.email)};
   },
   async obterSinsalabim(ctx,b) {return {edicao:await detalhes(await edicaoDaOrg(ctx.org,b.id)),cota:await cotaSinsa(ctx.org)};},
   async criarSinsalabim(ctx,b) {

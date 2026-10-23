@@ -287,7 +287,7 @@ export const acoesOrg = {
   async conectarRede(ctx, b) {
     if (!podeGerir(ctx.papel)) falha("Só donos e administradores podem conectar redes.", 403);
     if (!REDES_CONECTAVEIS[b.rede]) falha("Rede desconhecida.");
-    return { url: await linkConexao(ctx.org, b.rede, voltarPara(b.voltar)) };
+    return { url: await linkConexao(ctx.org, b.rede, voltarPara(b.voltar), { via: b.via === "facebook" ? "facebook" : undefined }) };
   },
 
   async desconectarRede(ctx, b) {

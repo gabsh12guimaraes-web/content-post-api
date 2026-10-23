@@ -284,7 +284,11 @@ async function criarPerfil(org, z) {
 }
 const SO_PELA_PROPRIA = "Esta organização publica pela própria conta do Zernio: conecte e desconecte as redes em zernio.com. Para fazer por aqui, remova a chave do Zernio em Integrações.";
 // Link para o cliente autorizar uma rede; a conta conectada entra no profile da organização.
-export async function linkConexao(org, nomeRede, voltar) {
+// Tela de boas-vindas do Zernio com a nossa marca: ela segue sozinha para a autorização da rede.
+// No iPhone isso importa: um toque direto em instagram.com abre o app do Instagram, que não conclui a autorização.
+const BOAS_VINDAS = { welcome: "true", brandName: "Easy Content Post", primaryColor: "#F8395A", logoUrl: "https://easycontentpost.com.br/marca/content-post-icone.png" };
+// via "facebook": Instagram pelo login do Facebook (conta profissional ligada a uma Página).
+export async function linkConexao(org, nomeRede, voltar, { via } = {}) {
   const plataforma = REDES_CONECTAVEIS[nomeRede];
   if (!plataforma) throw new ErroIntegracao("Rede desconhecida.");
   const z = await zernioDe(org);
@@ -293,7 +297,11 @@ export async function linkConexao(org, nomeRede, voltar) {
   // Pede só a permissão de publicar: a tela de autorização da rede mostra uma lista menor.
   const q = new URLSearchParams({ profileId: perfil, scopes: "posting" });
   if (voltar) q.set("redirect_url", voltar);
-  const r = await pedir(`${ZERNIO}/connect/${plataforma}?${q}`, { headers: cabecalho(z) });
+  if (plataforma === "instagram" && via === "facebook") q.set("loginMethod", "facebook_login");
+  const marcado = new URLSearchParams([...q, ...Object.entries(BOAS_VINDAS)]);
+  let r = await pedir(`${ZERNIO}/connect/${plataforma}?${marcado}`, { headers: cabecalho(z) });
+  // Se o Zernio recusar a tela com a marca, conecta do jeito simples em vez de travar.
+  if (r.status === 400) r = await pedir(`${ZERNIO}/connect/${plataforma}?${q}`, { headers: cabecalho(z) });
   const url = r.json && r.json.authUrl;
   if (!r.ok || !/^https:\/\//.test(url || "")) throw new ErroIntegracao(`O Zernio não abriu a conexão com o ${nomeRede}: ${motivoZernio(r)}`);
   return url;

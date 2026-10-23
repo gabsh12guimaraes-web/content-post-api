@@ -479,6 +479,11 @@ test("redes conectadas: um profile do Zernio por organização e cada uma public
     const ligar = pedidos.find(p => p.caminho === "/api/v1/connect/instagram");
     assert.equal(ligar.busca.get("profileId"), "perfil1");
     assert.equal(ligar.busca.get("redirect_url"), "https://gabsh12guimaraes-web.github.io/app.html?x=1");
+    assert.equal(ligar.busca.get("welcome"), "true");
+    assert.equal(ligar.busca.get("brandName"), "Easy Content Post");
+    assert.equal(ligar.busca.get("loginMethod"), null);
+    await chamar({ acao: "conectarRede", rede: "Instagram", via: "facebook" }, fabio);
+    assert.equal(pedidos.filter(p => p.caminho === "/api/v1/connect/instagram").at(-1).busca.get("loginMethod"), "facebook_login");
     assert.equal((await db().query("select zernio_profile from organizacoes where id = $1", [orgF])).rows[0].zernio_profile, "perfil1");
     // Segunda conexão reaproveita o profile; volta para site de fora não é repassada.
     await chamar({ acao: "conectarRede", rede: "X", voltar: "https://site-malicioso.com/" }, fabio);
