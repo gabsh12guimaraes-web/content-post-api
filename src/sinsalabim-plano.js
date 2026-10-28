@@ -221,8 +221,21 @@ const lerFonte = n => { if (!ARQUIVOS_FONTE.has(n)) ARQUIVOS_FONTE.set(n, fs.rea
 // O HTML5 do Shotstack bloqueia fontes remotas: cada fonte usada vai embutida no CSS.
 const fontes = chaves => [...new Set(chaves)].map(k => { const f = FONTES_SINSA[k]; return `@font-face{font-family:${f.familia};font-weight:${f.faixa || f.peso};font-style:${f.italico ? 'italic' : 'normal'};src:url(data:font/woff2;base64,${lerFonte(f.arquivo)}) format('woff2')}`; }).join('');
 const s3=n=>Math.max(0,n).toFixed(3);
-// Aparece só entre inicio e inicio+duracao: fora da animação vale a opacidade 0 da classe .j.
-const janela=(inicio,duracao,extra='')=>`animation:ver ${s3(duracao)}s linear ${s3(inicio)}s 1${extra}`;
+// Cada elemento tem a própria animação, do começo ao fim do vídeo, que liga e desliga em degraus.
+// Não depende do "fill" da animação: o renderizador do Shotstack mantém o último quadro de uma animação que já
+// terminou, e por isso a janela antiga (opacidade só durante a animação) deixava títulos e textos na tela até o fim.
+const pct=(t,total)=>Math.max(0,Math.min(100,t/total*100)).toFixed(4);
+function janelasSinsa(total){
+  const quadros=[];
+  const nova=(corpo)=>{const n='k'+quadros.length;quadros.push(`@keyframes ${n}{${corpo}}`);return `${n} ${s3(total)}s step-end 0s 1 both`;};
+  return {
+    quadros,
+    // visível de inicio a inicio+duracao
+    janela:(inicio,duracao)=>`animation:${nova(`0%{opacity:0}${pct(inicio,total)}%{opacity:1}${pct(inicio+duracao,total)}%{opacity:0}`)}`,
+    // a palavra dita acende só enquanto é falada
+    acende:(inicio,fim,ativa,apagada)=>nova(`0%{${apagada}}${pct(inicio,total)}%{${ativa}}${pct(fim,total)}%{${apagada}}`),
+  };
+}
 // Camada única com legendas, destaques e chamadas: os tempos são absolutos, a partir do início do vídeo.
 const corTexto = hex => { const n = parseInt(hex.slice(1), 16), l = (0.2126 * (n >> 16) + 0.7152 * (n >> 8 & 255) + 0.0722 * (n & 255)) / 255; return l > 0.6 ? '#111' : '#fff'; };
 const ENTRADA_LEG = { pop: 'pop .16s ease-out', desfoque: 'desfoca .24s ease-out', subir: 'sobe .22s cubic-bezier(.2,.9,.3,1)' };
@@ -234,11 +247,14 @@ export function camadaTextoSinsa(plano, total=plano.duracao) {
   const fl=plano.fonteLegenda||'forte',fd=plano.fonteDestaque||'cursiva',F=FONTES_SINSA[fl]||FONTES_SINSA.forte;
   const fam=f=>`${f.italico?'italic ':''}${f.peso}`;
   const usadas=new Set([fl,fd]);
+  const ativa=plano.legendaEstilo==='pilula'?`color:#fff;background:${cor};box-shadow:0 6px 0 #0004`:`color:${cor};transform:scale(1.12)`;
+  const apagada=plano.legendaEstilo==='pilula'?'color:#fff;background:transparent;box-shadow:none':'color:#fff;transform:none';
+  const {quadros,janela,acende}=janelasSinsa(total);
   const livre=g=>!(plano.destaques||[]).some(d=>g[0].inicio<d.inicio+d.duracao&&g.at(-1).fim>d.inicio);
   if(plano.legendas)for(const g of gruposLegendas(plano).filter(livre)){
     const inicio=g[0].inicio,fim=Math.min(total,g.at(-1).fim+0.12);
     // "digitar": cada palavra aparece quando é dita.
-    const palavras=g.map(w=>`<span class="w" style="animation:${anim==='digitar'?`mostra .08s linear ${s3(w.inicio)}s 1 both,`:''}acende ${s3(Math.max(0.08,w.fim-w.inicio))}s linear ${s3(w.inicio)}s 1">${esc(w.texto)}</span>`).join(' ');
+    const palavras=g.map(w=>`<span class="w" style="animation:${anim==='digitar'?`mostra .08s linear ${s3(w.inicio)}s 1 both,`:''}${acende(w.inicio,Math.max(w.inicio+0.08,w.fim),ativa,apagada)}">${esc(w.texto)}</span>`).join(' ');
     const entrada=ENTRADA_LEG[anim]?`animation:${ENTRADA_LEG[anim]} ${s3(inicio)}s 1 both`:'';
     partes.push(`<div class="j leg" style="${janela(inicio,fim-inicio)}"><div class="pop" style="${entrada}">${palavras}</div></div>`);
   }
@@ -266,14 +282,13 @@ export function camadaTextoSinsa(plano, total=plano.duracao) {
   if(plano.chamada)partes.push(`<div class="j card" style="${janela(total-t,t)}"><div class="pop" style="animation:pop .25s ease-out ${s3(total-t)}s 1 both">${esc(plano.chamada)}</div></div>`);
   const tam=(TAMANHOS_LEGENDA[plano.tamanhoLegenda]||1)*(fl==='condensada'?1.12:1);
   const tamLeg=Math.round((plano.legendaEstilo==='unica'?104:78)*tam),topo=POSICOES_LEGENDA[plano.posicaoLegenda]||POSICOES_LEGENDA.baixo;
-  const ativa=plano.legendaEstilo==='pilula'?`color:#fff;background:${cor};box-shadow:0 6px 0 #0004`:`color:${cor};transform:scale(1.12)`;
   const css=`${fontes([...usadas])}html,body{margin:0;width:1080px;height:1920px;background:transparent;overflow:hidden}
 .j{position:absolute;left:60px;right:60px;opacity:0;text-align:center}
-@keyframes ver{from,to{opacity:1}}@keyframes pop{from{opacity:0;transform:scale(.82) translateY(14px)}to{opacity:1;transform:none}}@keyframes surge{from{opacity:0;transform:scale(.5) rotate(-4deg)}to{opacity:1;transform:none}}
+@keyframes pop{from{opacity:0;transform:scale(.82) translateY(14px)}to{opacity:1;transform:none}}@keyframes surge{from{opacity:0;transform:scale(.5) rotate(-4deg)}to{opacity:1;transform:none}}
 @keyframes desfoca{from{opacity:0;filter:blur(18px);transform:scale(1.08)}to{opacity:1;filter:none;transform:none}}@keyframes sobe{from{opacity:0;transform:translateY(60px)}to{opacity:1;transform:none}}
 @keyframes caixa{from{opacity:0;transform:scaleX(.2)}to{opacity:1;transform:none}}@keyframes desliza{from{opacity:0;transform:translateX(-140px)}to{opacity:1;transform:none}}
 @keyframes digita{from{clip-path:inset(0 100% 0 0)}to{clip-path:inset(0 0 0 0)}}@keyframes mostra{from{opacity:0}to{opacity:1}}@keyframes barra{from{transform:scaleY(0)}to{transform:none}}
-@keyframes acende{from,to{${ativa}}}
+${quadros.join('')}
 .leg{top:${topo}px;font:${fam(F)} ${tamLeg}px/1.12 ${F.familia},Arial,sans-serif;text-transform:uppercase;color:#fff;-webkit-text-stroke:12px #000;paint-order:stroke fill;text-shadow:0 7px 0 #0005;letter-spacing:-1px}
 .leg .w{display:inline-block;padding:2px 12px;margin:0 -6px;border-radius:14px}
 .dest small{display:block;font:${fam(F)} 46px/1.1 ${F.familia},Arial,sans-serif;text-transform:uppercase;color:#fff;-webkit-text-stroke:8px #000;paint-order:stroke fill;margin-bottom:-6px}
@@ -286,7 +301,8 @@ export function camadaTextoSinsa(plano, total=plano.duracao) {
 .card-m{display:inline-block;width:780px;padding:32px 36px;border-radius:32px;background:#1c1d23;color:#fff;text-align:left;box-shadow:0 24px 70px #000a;border:2px solid #ffffff1a}
 .card-m .cab{display:flex;align-items:center;gap:16px;font:${fam(F)} 40px/1.2 ${F.familia},sans-serif}.card-m .cab i{width:46px;height:46px;border-radius:50%;background:${cor}}
 .card-m p{margin:18px 0 0;font:500 38px/1.4 Arial,sans-serif;color:#d9dae0}`;
-  return {asset:{type:'html5',html:partes.join(''),css},start:0,length:+total.toFixed(3)};
+  // O tamanho do HTML5 vai no clipe; sem ele o Shotstack desenha a página em 1920x1080 e estica para o vídeo em pé.
+  return {asset:{type:'html5',html:partes.join(''),css},start:0,length:+total.toFixed(3),width:1080,height:1920};
 }
 // Efeitos sonoros: "whoosh" quando um texto ou card entra e "pop" quando uma imagem aparece (arquivos gerados na API, em /sfx).
 export const SFX_SINSA = { whoosh: 0.55, pop: 0.25 };

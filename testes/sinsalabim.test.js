@@ -151,8 +151,14 @@ test('edição estilo Captions: tira pausas, zoom fixo alternado, legenda curta 
   assert(json.includes('Carv') && json.includes('class=\\"j dest\\"') && json.includes('não clareia'));
   const topo = trilhas.find(c=>c.asset.type==='image'); assert.equal(topo.position,'top'); assert.equal(topo.fit,'contain');
   // Enquanto o destaque aparece, nenhum bloco de legenda é mostrado.
-  const blocos = [...texto[0].asset.html.matchAll(/class="j leg" style="animation:ver ([\d.]+)s linear ([\d.]+)s/g)].map(m=>[+m[2],+m[2]+ +m[1]]);
-  assert(blocos.length && blocos.every(([a,b]) => !p.destaques.some(d => a < d.inicio + d.duracao && b > d.inicio)));
+  // Cada bloco liga e desliga numa animação do vídeo inteiro (o Shotstack mantém o fim de animações que já acabaram).
+  const quadros = Object.fromEntries([...texto[0].asset.css.matchAll(/@keyframes (k\d+)\{0%\{opacity:0\}([\d.]+)%\{opacity:1\}([\d.]+)%\{opacity:0\}\}/g)].map(m=>[m[1],[+m[2]*p.duracao/100,+m[3]*p.duracao/100]]));
+  const janelaDe = cls => [...texto[0].asset.html.matchAll(new RegExp(`class="j ${cls}"[^>]*?animation:(k\\d+) ([\\d.]+)s step-end 0s 1 both`,'g'))].map(m=>{assert.equal(+m[2],p.duracao);return quadros[m[1]];});
+  const blocos = janelaDe('leg');
+  assert(blocos.length && blocos.every(([a,b]) => !p.destaques.some(d => a < d.inicio + d.duracao - 0.01 && b > d.inicio + 0.01)));
+  assert(!texto[0].asset.html.includes('animation:ver'));
+  const [abertura] = janelaDe('card'); assert(abertura[0] === 0 && abertura[1] <= 2.61, 'o título de abertura sai depois de 2,6 s');
+  assert.equal(texto[0].width, 1080); assert.equal(texto[0].height, 1920);
 });
 
 test('vários vídeos viram uma sequência na ordem, com as partes marcadas para a edição', async () => {
